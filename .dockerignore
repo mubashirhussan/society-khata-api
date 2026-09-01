@@ -1,0 +1,7 @@
+bin/
+obj/
+.git
+Dockerfile
+.dockerignore
+*.user
+*.http
