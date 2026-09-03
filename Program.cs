@@ -68,6 +68,37 @@ using (var scope = app.Services.CreateScope())
 {
     var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
     db.Database.EnsureCreated();
+    await db.Database.ExecuteSqlRawAsync("""
+        CREATE TABLE IF NOT EXISTS "InstallmentDues" (
+            "Id" uuid NOT NULL,
+            "TenantId" uuid NOT NULL,
+            "ClientId" uuid NOT NULL,
+            "PropertyId" uuid NOT NULL,
+            "DueDate" date NOT NULL,
+            "Amount" numeric NOT NULL,
+            "Status" text NOT NULL DEFAULT 'pending',
+            "PlanFrequency" text NULL,
+            "PaymentId" uuid NULL,
+            "CreatedAt" timestamp with time zone NOT NULL,
+            CONSTRAINT "PK_InstallmentDues" PRIMARY KEY ("Id"),
+            CONSTRAINT "FK_InstallmentDues_Clients_ClientId"
+                FOREIGN KEY ("ClientId") REFERENCES "Clients" ("Id") ON DELETE RESTRICT,
+            CONSTRAINT "FK_InstallmentDues_Properties_PropertyId"
+                FOREIGN KEY ("PropertyId") REFERENCES "Properties" ("Id") ON DELETE RESTRICT,
+            CONSTRAINT "FK_InstallmentDues_Payments_PaymentId"
+                FOREIGN KEY ("PaymentId") REFERENCES "Payments" ("Id") ON DELETE SET NULL
+        );
+        ALTER TABLE "InstallmentDues"
+            ADD COLUMN IF NOT EXISTS "PlanFrequency" text NULL;
+        CREATE INDEX IF NOT EXISTS "IX_InstallmentDues_TenantId_Status_DueDate"
+            ON "InstallmentDues" ("TenantId", "Status", "DueDate");
+        CREATE INDEX IF NOT EXISTS "IX_InstallmentDues_ClientId"
+            ON "InstallmentDues" ("ClientId");
+        CREATE INDEX IF NOT EXISTS "IX_InstallmentDues_PropertyId"
+            ON "InstallmentDues" ("PropertyId");
+        CREATE INDEX IF NOT EXISTS "IX_InstallmentDues_PaymentId"
+            ON "InstallmentDues" ("PaymentId");
+        """);
     await DbSeeder.SeedAsync(db);
 }
 

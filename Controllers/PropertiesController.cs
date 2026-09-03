@@ -31,7 +31,12 @@ public class PropertiesController(AppDbContext db) : ControllerBase
     [RequirePermission(PermissionKeys.PropertiesCreate)]
     public async Task<ActionResult<PropertyDto>> Create(PropertyRequest req)
     {
-        var property = Map(new Property { TenantId = User.GetTenantId() }, req);
+        var property = Map(new Property
+        {
+            TenantId = User.GetTenantId(),
+            Status = "available",
+            ClientId = null
+        }, req);
         db.Properties.Add(property);
         await db.SaveChangesAsync();
         await db.Entry(property).Reference(p => p.Client).LoadAsync();
@@ -71,8 +76,6 @@ public class PropertiesController(AppDbContext db) : ControllerBase
         p.Marla = req.Marla;
         p.TotalPrice = req.TotalPrice;
         p.BookingDate = req.BookingDate;
-        p.Status = req.Status;
-        p.ClientId = req.ClientId;
         p.Notes = req.Notes;
         return p;
     }

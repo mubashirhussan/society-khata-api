@@ -12,8 +12,15 @@ namespace SocietyKhata.Api.Controllers;
 [ApiController]
 [Authorize]
 [Route("api/[controller]")]
-public class ClientsController(AppDbContext db) : ControllerBase
+public class ClientsController(AppDbContext db, IWebHostEnvironment environment) : ControllerBase
 {
+    private static readonly Dictionary<string, string> PictureExtensions = new(StringComparer.OrdinalIgnoreCase)
+    {
+        ["image/jpeg"] = ".jpg",
+        ["image/png"] = ".png",
+        ["image/webp"] = ".webp"
+    };
+
     [HttpGet]
     [RequirePermission(PermissionKeys.PropertiesView)]
     public async Task<ActionResult<List<ClientDto>>> List()
@@ -62,12 +69,55 @@ public class ClientsController(AppDbContext db) : ControllerBase
         return Ok(ToDto(client));
     }
 
+    [HttpPost("{id:guid}/picture")]
+    [RequirePermission(PermissionKeys.PropertiesCreate)]
+    [RequestSizeLimit(6 * 1024 * 1024)]
+    public async Task<ActionResult<ClientDto>> UploadPicture(Guid id, [FromForm] IFormFile picture)
+    {
+        var client = await FindAsync(id);
+        if (client is null) return NotFound();
+        if (picture.Length == 0 || picture.Length > 5 * 1024 * 1024)
+            return BadRequest("Please choose an image smaller than 5 MB.");
+        if (!PictureExtensions.TryGetValue(picture.ContentType, out var extension))
+            return BadRequest("Only JPG, PNG, and WebP images are supported.");
+
+        var directory = GetPictureDirectory(client.TenantId);
+        Directory.CreateDirectory(directory);
+        DeletePictureFiles(client);
+
+        var path = Path.Combine(directory, $"{client.Id}{extension}");
+        await using var stream = System.IO.File.Create(path);
+        await picture.CopyToAsync(stream);
+
+        return Ok(ToDto(client));
+    }
+
+    [HttpGet("{id:guid}/picture")]
+    [RequirePermission(PermissionKeys.PropertiesView)]
+    public async Task<IActionResult> GetPicture(Guid id)
+    {
+        var client = await FindAsync(id);
+        if (client is null) return NotFound();
+
+        var path = FindPicturePath(client);
+        if (path is null) return NotFound();
+
+        var contentType = Path.GetExtension(path).ToLowerInvariant() switch
+        {
+            ".png" => "image/png",
+            ".webp" => "image/webp",
+            _ => "image/jpeg"
+        };
+        return PhysicalFile(path, contentType);
+    }
+
     [HttpDelete("{id:guid}")]
     [RequirePermission(PermissionKeys.PropertiesDelete)]
     public async Task<IActionResult> Delete(Guid id)
     {
         var client = await FindAsync(id);
         if (client is null) return NotFound();
+        DeletePictureFiles(client);
         db.Clients.Remove(client);
         await db.SaveChangesAsync();
         return NoContent();
@@ -76,6 +126,29 @@ public class ClientsController(AppDbContext db) : ControllerBase
     private async Task<Client?> FindAsync(Guid id) =>
         await db.Clients.FirstOrDefaultAsync(c => c.Id == id && c.TenantId == User.GetTenantId());
 
-    private static ClientDto ToDto(Client c) =>
-        new(c.Id, c.Name, c.Cnic, c.Phone, c.Address, c.FatherHusband, c.Notes, c.CreatedAt);
+    private ClientDto ToDto(Client c) =>
+        new(c.Id, c.Name, c.Cnic, c.Phone, c.Address, c.FatherHusband, c.Notes, c.CreatedAt, FindPicturePath(c) is not null);
+
+    private string GetPictureDirectory(Guid tenantId) =>
+        Path.Combine(environment.ContentRootPath, "uploads", "client-pictures", tenantId.ToString());
+
+    private string? FindPicturePath(Client client)
+    {
+        var directory = GetPictureDirectory(client.TenantId);
+        if (!Directory.Exists(directory)) return null;
+
+        return PictureExtensions.Values
+            .Select(extension => Path.Combine(directory, $"{client.Id}{extension}"))
+            .FirstOrDefault(System.IO.File.Exists);
+    }
+
+    private void DeletePictureFiles(Client client)
+    {
+        var directory = GetPictureDirectory(client.TenantId);
+        foreach (var extension in PictureExtensions.Values)
+        {
+            var path = Path.Combine(directory, $"{client.Id}{extension}");
+            if (System.IO.File.Exists(path)) System.IO.File.Delete(path);
+        }
+    }
 }

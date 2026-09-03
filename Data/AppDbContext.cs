@@ -13,6 +13,7 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
     public DbSet<Client> Clients => Set<Client>();
     public DbSet<Property> Properties => Set<Property>();
     public DbSet<Payment> Payments => Set<Payment>();
+    public DbSet<InstallmentDue> InstallmentDues => Set<InstallmentDue>();
     public DbSet<Expense> Expenses => Set<Expense>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
@@ -86,6 +87,27 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
             .HasOne(p => p.Property)
             .WithMany()
             .HasForeignKey(p => p.PropertyId)
+            .OnDelete(DeleteBehavior.SetNull);
+
+        modelBuilder.Entity<InstallmentDue>()
+            .HasIndex(d => new { d.TenantId, d.Status, d.DueDate });
+
+        modelBuilder.Entity<InstallmentDue>()
+            .HasOne(d => d.Client)
+            .WithMany()
+            .HasForeignKey(d => d.ClientId)
+            .OnDelete(DeleteBehavior.Restrict);
+
+        modelBuilder.Entity<InstallmentDue>()
+            .HasOne(d => d.Property)
+            .WithMany()
+            .HasForeignKey(d => d.PropertyId)
+            .OnDelete(DeleteBehavior.Restrict);
+
+        modelBuilder.Entity<InstallmentDue>()
+            .HasOne(d => d.Payment)
+            .WithMany()
+            .HasForeignKey(d => d.PaymentId)
             .OnDelete(DeleteBehavior.SetNull);
 
         modelBuilder.Entity<Expense>()
