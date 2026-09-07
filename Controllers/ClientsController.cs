@@ -71,12 +71,13 @@ public class ClientsController(AppDbContext db, IWebHostEnvironment environment)
 
     [HttpPost("{id:guid}/picture")]
     [RequirePermission(PermissionKeys.PropertiesCreate)]
+    [Consumes("multipart/form-data")]
     [RequestSizeLimit(6 * 1024 * 1024)]
-    public async Task<ActionResult<ClientDto>> UploadPicture(Guid id, [FromForm] IFormFile picture)
+    public async Task<ActionResult<ClientDto>> UploadPicture(Guid id, IFormFile? picture)
     {
         var client = await FindAsync(id);
         if (client is null) return NotFound();
-        if (picture.Length == 0 || picture.Length > 5 * 1024 * 1024)
+        if (picture is null || picture.Length == 0 || picture.Length > 5 * 1024 * 1024)
             return BadRequest("Please choose an image smaller than 5 MB.");
         if (!PictureExtensions.TryGetValue(picture.ContentType, out var extension))
             return BadRequest("Only JPG, PNG, and WebP images are supported.");
