@@ -6,7 +6,7 @@ public record CreateUserRequest(string Email, string Password, Guid RoleId, stri
 public record AuthResponse(string Token, UserDto User);
 public record UserDto(
     Guid Id, string Email, Guid RoleId, string RoleName, string? FullName,
-    Guid TenantId, string TenantName, List<string> Permissions);
+    Guid TenantId, string TenantName, List<string> Permissions, bool HasLogo = false);
 public record UserListDto(Guid Id, string Email, Guid RoleId, string RoleName, string? FullName, bool IsActive, DateTime CreatedAt);
 
 public record PermissionDto(string Key, string Name, string Group);

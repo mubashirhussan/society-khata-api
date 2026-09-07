@@ -7,7 +7,7 @@ namespace SocietyKhata.Api.Services;
 
 public static class UserMapper
 {
-    public static UserDto ToDto(User user, Tenant tenant, List<string> permissions) =>
+    public static UserDto ToDto(User user, Tenant tenant, List<string> permissions, bool hasLogo = false) =>
         new(
             user.Id,
             user.Email,
@@ -16,9 +16,10 @@ public static class UserMapper
             user.FullName,
             user.TenantId,
             tenant.Name,
-            permissions);
+            permissions,
+            hasLogo);
 
-    public static async Task<UserDto?> LoadUserDtoAsync(AppDbContext db, Guid userId)
+    public static async Task<UserDto?> LoadUserDtoAsync(AppDbContext db, Guid userId, TenantLogoStorage? logos = null)
     {
         var user = await db.Users
             .Include(u => u.Tenant)
@@ -32,6 +33,7 @@ public static class UserMapper
             .Select(rp => rp.PermissionKey)
             .ToListAsync();
 
-        return ToDto(user, user.Tenant, permissions);
+        var hasLogo = logos?.HasLogo(user.TenantId) ?? false;
+        return ToDto(user, user.Tenant, permissions, hasLogo);
     }
 }

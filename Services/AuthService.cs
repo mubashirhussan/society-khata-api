@@ -9,7 +9,7 @@ using SocietyKhata.Api.Models;
 
 namespace SocietyKhata.Api.Services;
 
-public class AuthService(AppDbContext db, IConfiguration config, PermissionService permissions)
+public class AuthService(AppDbContext db, IConfiguration config, PermissionService permissions, TenantLogoStorage logos)
 {
     public async Task<AuthResponse> RegisterAsync(RegisterRequest req)
     {
@@ -60,13 +60,13 @@ public class AuthService(AppDbContext db, IConfiguration config, PermissionServi
     }
 
     public async Task<UserDto?> GetMeAsync(Guid userId) =>
-        await UserMapper.LoadUserDtoAsync(db, userId);
+        await UserMapper.LoadUserDtoAsync(db, userId, logos);
 
     private async Task<AuthResponse> CreateAuthResponseAsync(User user, Tenant tenant)
     {
         var permissionKeys = await permissions.GetRolePermissionKeysAsync(user.TenantRoleId);
         var token = GenerateToken(user, permissionKeys);
-        var dto = UserMapper.ToDto(user, tenant, permissionKeys);
+        var dto = UserMapper.ToDto(user, tenant, permissionKeys, logos.HasLogo(tenant.Id));
         return new AuthResponse(token, dto);
     }
 

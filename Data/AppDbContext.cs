@@ -89,6 +89,12 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
             .HasForeignKey(p => p.PropertyId)
             .OnDelete(DeleteBehavior.SetNull);
 
+        modelBuilder.Entity<Payment>()
+            .HasOne(p => p.InstallmentDue)
+            .WithMany()
+            .HasForeignKey(p => p.InstallmentDueId)
+            .OnDelete(DeleteBehavior.SetNull);
+
         modelBuilder.Entity<InstallmentDue>()
             .HasIndex(d => new { d.TenantId, d.Status, d.DueDate });
 
@@ -109,6 +115,10 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
             .WithMany()
             .HasForeignKey(d => d.PaymentId)
             .OnDelete(DeleteBehavior.SetNull);
+
+        modelBuilder.Entity<InstallmentDue>()
+            .Property(d => d.AmountPaid)
+            .HasPrecision(18, 2);
 
         modelBuilder.Entity<Expense>()
             .HasIndex(e => e.TenantId);
