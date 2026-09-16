@@ -61,6 +61,20 @@ public class PropertiesController(AppDbContext db) : ControllerBase
     {
         var property = await FindAsync(id);
         if (property is null) return NotFound();
+        var tenantId = User.GetTenantId();
+
+        var payments = await db.Payments
+            .Where(p => p.TenantId == tenantId && p.PropertyId == id)
+            .ToListAsync();
+        foreach (var payment in payments)
+            payment.IsDeleted = true;
+
+        var pendingDues = await db.InstallmentDues
+            .Where(d => d.TenantId == tenantId && d.PropertyId == id && d.Status == "pending")
+            .ToListAsync();
+        foreach (var due in pendingDues)
+            due.Status = "cancelled";
+
         property.IsDeleted = true;
         await db.SaveChangesAsync();
         return NoContent();
