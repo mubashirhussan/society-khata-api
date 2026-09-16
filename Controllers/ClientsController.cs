@@ -27,7 +27,7 @@ public class ClientsController(AppDbContext db, IWebHostEnvironment environment)
     {
         var tenantId = User.GetTenantId();
         var items = await db.Clients
-            .Where(c => c.TenantId == tenantId)
+            .Where(c => c.TenantId == tenantId && !c.IsDeleted)
             .OrderBy(c => c.Name)
             .ToListAsync();
         return Ok(items.Select(ToDto).ToList());
@@ -45,6 +45,7 @@ public class ClientsController(AppDbContext db, IWebHostEnvironment environment)
             Phone = req.Phone,
             Address = req.Address,
             FatherHusband = req.FatherHusband,
+            Caste = req.Caste,
             Notes = req.Notes
         };
         db.Clients.Add(client);
@@ -64,6 +65,7 @@ public class ClientsController(AppDbContext db, IWebHostEnvironment environment)
         client.Phone = req.Phone;
         client.Address = req.Address;
         client.FatherHusband = req.FatherHusband;
+        client.Caste = req.Caste;
         client.Notes = req.Notes;
         await db.SaveChangesAsync();
         return Ok(ToDto(client));
@@ -118,17 +120,42 @@ public class ClientsController(AppDbContext db, IWebHostEnvironment environment)
     {
         var client = await FindAsync(id);
         if (client is null) return NotFound();
+        var tenantId = User.GetTenantId();
+
+        var properties = await db.Properties
+            .Where(p => p.TenantId == tenantId && p.ClientId == id)
+            .ToListAsync();
+
+        foreach (var property in properties)
+        {
+            var payments = await db.Payments
+                .Where(p => p.TenantId == tenantId && p.PropertyId == property.Id)
+                .ToListAsync();
+            foreach (var payment in payments)
+                payment.IsDeleted = true;
+
+            var pendingDues = await db.InstallmentDues
+                .Where(d => d.TenantId == tenantId && d.PropertyId == property.Id && d.Status == "pending")
+                .ToListAsync();
+            foreach (var due in pendingDues)
+                due.Status = "cancelled";
+
+            property.Status = "available";
+            property.ClientId = null;
+            property.BookingDate = null;
+        }
+
         DeletePictureFiles(client);
-        db.Clients.Remove(client);
+        client.IsDeleted = true;
         await db.SaveChangesAsync();
         return NoContent();
     }
 
     private async Task<Client?> FindAsync(Guid id) =>
-        await db.Clients.FirstOrDefaultAsync(c => c.Id == id && c.TenantId == User.GetTenantId());
+        await db.Clients.FirstOrDefaultAsync(c => c.Id == id && c.TenantId == User.GetTenantId() && !c.IsDeleted);
 
     private ClientDto ToDto(Client c) =>
-        new(c.Id, c.Name, c.Cnic, c.Phone, c.Address, c.FatherHusband, c.Notes, c.CreatedAt, FindPicturePath(c) is not null);
+        new(c.Id, c.Name, c.Cnic, c.Phone, c.Address, c.FatherHusband, c.Notes, c.CreatedAt, FindPicturePath(c) is not null, c.Caste);
 
     private string GetPictureDirectory(Guid tenantId) =>
         Path.Combine(environment.ContentRootPath, "uploads", "client-pictures", tenantId.ToString());

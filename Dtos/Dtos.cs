@@ -15,21 +15,22 @@ public record PermissionGroupDto(string Group, List<PermissionDto> Permissions);
 public record RoleDto(Guid Id, string Name, bool IsSystem, List<string> Permissions);
 public record UpdateRolePermissionsRequest(List<string> PermissionKeys);
 
-public record ClientDto(Guid Id, string Name, string? Cnic, string? Phone, string? Address, string? FatherHusband, string? Notes, DateTime CreatedAt, bool HasPicture = false);
-public record ClientRequest(string Name, string? Cnic, string? Phone, string? Address, string? FatherHusband, string? Notes);
+public record ClientDto(Guid Id, string Name, string? Cnic, string? Phone, string? Address, string? FatherHusband, string? Notes, DateTime CreatedAt, bool HasPicture = false, string? Caste = null);
+public record ClientRequest(string Name, string? Cnic, string? Phone, string? Address, string? FatherHusband, string? Notes, string? Caste = null);
 
 public record PropertyDto(
     Guid Id, string PropertyNumber, string PropertyType, decimal? Marla, decimal TotalPrice,
-    DateOnly? BookingDate, string Status, Guid? ClientId, string? Notes, DateTime CreatedAt, ClientDto? Client);
+    DateOnly? BookingDate, string Status, Guid? ClientId, string? Notes, DateTime CreatedAt, ClientDto? Client,
+    decimal? LengthFeet = null, decimal? WidthFeet = null);
 
 public record PropertyRequest(
     string PropertyNumber, string PropertyType, decimal? Marla, decimal TotalPrice,
-    DateOnly? BookingDate, string Status, Guid? ClientId, string? Notes);
+    DateOnly? BookingDate, string Status, Guid? ClientId, string? Notes,
+    decimal? LengthFeet = null, decimal? WidthFeet = null);
 
 public record PaymentDto(
     Guid Id, string? ReceiptNo, Guid? ClientId, Guid? PropertyId, decimal Amount,
-    DateOnly PaymentDate, string? Notes, DateTime CreatedAt, ClientDto? Client, PropertyDto? Property,
-    bool AmountLocked = false);
+    DateOnly PaymentDate, string? Notes, DateTime CreatedAt, ClientDto? Client, PropertyDto? Property);
 
 public record InstallmentScheduleItem(DateOnly DueDate, decimal Amount);
 

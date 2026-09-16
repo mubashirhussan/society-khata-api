@@ -25,8 +25,7 @@ public class PaymentsController(AppDbContext db) : ControllerBase
             .Where(p => p.TenantId == tenantId)
             .OrderByDescending(p => p.PaymentDate)
             .ToListAsync();
-        var plannedPropertyIds = await GetPropertyIdsWithPlansAsync(tenantId);
-        return Ok(items.Select(p => ToDto(p, IsAmountLocked(p, plannedPropertyIds))).ToList());
+        return Ok(items.Select(p => ToDto(p)).ToList());
     }
 
     [HttpGet("ledger")]
@@ -44,7 +43,8 @@ public class PaymentsController(AppDbContext db) : ControllerBase
         var dues = await db.InstallmentDues
             .Include(d => d.Client)
             .Include(d => d.Property)
-            .Where(d => d.TenantId == tenantId && d.Status == "pending")
+            .Where(d => d.TenantId == tenantId && d.Status == "pending"
+                && d.Property != null && d.ClientId == d.Property.ClientId)
             .OrderBy(d => d.DueDate)
             .ToListAsync();
 
@@ -76,15 +76,14 @@ public class PaymentsController(AppDbContext db) : ControllerBase
                 return BadRequest(new { error = "The payment must use the installment's client and property." });
             if (req.Amount <= 0)
                 return BadRequest(new { error = "Payment amount must be greater than zero." });
-            if (req.Amount > linkedDue.RemainingAmount)
-                return BadRequest(new { error = $"Payment cannot exceed the remaining installment of {linkedDue.RemainingAmount:N0}." });
         }
 
         var validation = await ValidateAndCalculateAmount(req, tenantId);
         if (validation.Error is not null) return BadRequest(new { error = validation.Error });
 
         var hasPlan = req.PropertyId.HasValue && await db.InstallmentDues.AnyAsync(d =>
-            d.TenantId == tenantId && d.PropertyId == req.PropertyId);
+            d.TenantId == tenantId && d.PropertyId == req.PropertyId && d.Status != "cancelled"
+            && d.Property != null && d.ClientId == d.Property.ClientId);
         if (hasPlan && linkedDue is null)
             return BadRequest(new { error = "This property already has an installment plan. Receive one of its pending installments instead." });
 
@@ -92,11 +91,29 @@ public class PaymentsController(AppDbContext db) : ControllerBase
             req, tenantId, validation.Remaining, validation.Amount);
         if (scheduleError is not null) return BadRequest(new { error = scheduleError });
 
+        var overflowChain = new List<InstallmentDue>();
+        if (linkedDue is not null)
+        {
+            overflowChain.Add(linkedDue);
+            if (validation.Amount > linkedDue.RemainingAmount)
+            {
+                overflowChain.AddRange(await db.InstallmentDues
+                    .Where(d => d.TenantId == tenantId && d.PropertyId == linkedDue.PropertyId
+                        && d.ClientId == linkedDue.ClientId && d.Status == "pending" && d.Id != linkedDue.Id)
+                    .OrderBy(d => d.DueDate)
+                    .ToListAsync());
+
+                var capacity = overflowChain.Sum(d => d.RemainingAmount);
+                if (validation.Amount > capacity)
+                    return BadRequest(new { error = $"Payment cannot exceed the total remaining balance of {capacity:N0} across pending installments." });
+            }
+        }
+
         await using var transaction = await db.Database.BeginTransactionAsync();
         var payment = Map(new Payment { TenantId = tenantId }, req, validation.Amount);
         db.Payments.Add(payment);
         if (linkedDue is not null)
-            ApplyPaymentToDue(linkedDue, payment, validation.Amount);
+            ApplyPaymentWithOverflow(payment, overflowChain, validation.Amount, tenantId);
         else if (req.InstallmentSchedule is { Count: > 0 })
         {
             db.InstallmentDues.AddRange(req.InstallmentSchedule.Select(item => new InstallmentDue
@@ -113,7 +130,7 @@ public class PaymentsController(AppDbContext db) : ControllerBase
         await SyncProperty(payment.PropertyId);
         await transaction.CommitAsync();
         await LoadRefs(payment);
-        return Ok(ToDto(payment, await IsAmountLockedAsync(payment, tenantId)));
+        return Ok(ToDto(payment));
     }
 
     [HttpPut("{id:guid}")]
@@ -126,8 +143,6 @@ public class PaymentsController(AppDbContext db) : ControllerBase
             return BadRequest(new { error = "An installment plan cannot be replaced while editing a receipt." });
 
         var linkedDue = await FindLinkedDueAsync(payment);
-        var propertyHasPlan = payment.PropertyId.HasValue && await db.InstallmentDues.AnyAsync(d =>
-            d.TenantId == payment.TenantId && d.PropertyId == payment.PropertyId);
         if (linkedDue is not null)
         {
             if (req.ClientId != linkedDue.ClientId || req.PropertyId != linkedDue.PropertyId)
@@ -138,25 +153,45 @@ public class PaymentsController(AppDbContext db) : ControllerBase
             if (req.Amount > maxAllowed)
                 return BadRequest(new { error = $"Payment cannot exceed the remaining installment of {maxAllowed:N0}." });
         }
-        else if (propertyHasPlan && (req.ClientId != payment.ClientId
-            || req.PropertyId != payment.PropertyId || req.Amount != payment.Amount))
-        {
-            return BadRequest(new { error = "This receipt belongs to an installment plan. Only its receipt number, date, and notes can be changed." });
-        }
 
         var oldPropertyId = payment.PropertyId;
+        var oldAmount = payment.Amount;
         var validation = await ValidateAndCalculateAmount(req, payment.TenantId, payment.Id);
         if (validation.Error is not null) return BadRequest(new { error = validation.Error });
 
+        // A payment linked to one specific installment stays capped to that installment (see
+        // maxAllowed above) — spreading an edit across several installments would mean creating
+        // new Payment rows every time the receipt is saved, duplicating money on every re-edit.
+        // Only a standalone (not tied to one installment) payment can absorb extra amount into
+        // other pending installments, since that just adjusts their AmountPaid directly with no
+        // new rows involved.
+        var overflowDues = new List<InstallmentDue>();
+        var extraToApply = 0m;
+        if (linkedDue is null && req.PropertyId.HasValue && validation.Amount > oldAmount)
+        {
+            extraToApply = validation.Amount - oldAmount;
+            overflowDues = await db.InstallmentDues
+                .Where(d => d.TenantId == payment.TenantId && d.PropertyId == req.PropertyId
+                    && d.ClientId == req.ClientId && d.Status == "pending")
+                .OrderBy(d => d.DueDate)
+                .ToListAsync();
+
+            var capacity = overflowDues.Sum(d => d.RemainingAmount);
+            if (extraToApply > capacity)
+                return BadRequest(new { error = $"Payment cannot exceed the total remaining balance of {capacity:N0} across pending installments." });
+        }
+
         if (linkedDue is not null)
             AdjustDueForPaymentEdit(linkedDue, payment, validation.Amount);
+        else if (extraToApply > 0)
+            ApplyAmountToDueChain(payment, overflowDues, extraToApply);
 
         Map(payment, req, validation.Amount);
         await db.SaveChangesAsync();
         await SyncProperty(oldPropertyId);
         if (payment.PropertyId != oldPropertyId) await SyncProperty(payment.PropertyId);
         await LoadRefs(payment);
-        return Ok(ToDto(payment, await IsAmountLockedAsync(payment, payment.TenantId)));
+        return Ok(ToDto(payment));
     }
 
     [HttpDelete("{id:guid}")]
@@ -167,10 +202,6 @@ public class PaymentsController(AppDbContext db) : ControllerBase
         if (payment is null) return NotFound();
         var propertyId = payment.PropertyId;
         var linkedDue = await FindLinkedDueAsync(payment);
-        var propertyHasPlan = propertyId.HasValue && await db.InstallmentDues.AnyAsync(d =>
-            d.TenantId == payment.TenantId && d.PropertyId == propertyId);
-        if (propertyHasPlan && linkedDue is null)
-            return BadRequest(new { error = "The initial payment cannot be deleted while its installment plan exists." });
         if (linkedDue is not null)
             RemovePaymentFromDue(linkedDue, payment);
         payment.IsDeleted = true;
@@ -199,6 +230,53 @@ public class PaymentsController(AppDbContext db) : ControllerBase
         payment.InstallmentDueId = due.Id;
         due.AmountPaid += amount;
         SyncDueStatus(due, payment.Id);
+    }
+
+    private void ApplyPaymentWithOverflow(Payment payment, List<InstallmentDue> dueChain, decimal totalAmount, Guid tenantId)
+    {
+        var remaining = totalAmount;
+        for (var i = 0; i < dueChain.Count && remaining > 0; i++)
+        {
+            var due = dueChain[i];
+            var portion = Math.Min(remaining, due.RemainingAmount);
+
+            if (i == 0)
+            {
+                payment.Amount = portion;
+                ApplyPaymentToDue(due, payment, portion);
+            }
+            else
+            {
+                var overflowPayment = new Payment
+                {
+                    TenantId = tenantId,
+                    ReceiptNo = payment.ReceiptNo,
+                    ClientId = payment.ClientId,
+                    PropertyId = payment.PropertyId,
+                    Amount = portion,
+                    PaymentDate = payment.PaymentDate,
+                    Notes = payment.Notes,
+                    SourcePaymentId = payment.Id,
+                };
+                db.Payments.Add(overflowPayment);
+                ApplyPaymentToDue(due, overflowPayment, portion);
+            }
+
+            remaining -= portion;
+        }
+    }
+
+    private static void ApplyAmountToDueChain(Payment payment, List<InstallmentDue> pendingDues, decimal amountToApply)
+    {
+        var remaining = amountToApply;
+        foreach (var due in pendingDues)
+        {
+            if (remaining <= 0) break;
+            var portion = Math.Min(remaining, due.RemainingAmount);
+            due.AmountPaid += portion;
+            SyncDueStatus(due, payment.Id);
+            remaining -= portion;
+        }
     }
 
     private static void AdjustDueForPaymentEdit(InstallmentDue due, Payment payment, decimal newAmount)
@@ -232,24 +310,6 @@ public class PaymentsController(AppDbContext db) : ControllerBase
         }
     }
 
-    private async Task<HashSet<Guid>> GetPropertyIdsWithPlansAsync(Guid tenantId)
-    {
-        var ids = await db.InstallmentDues
-            .Where(d => d.TenantId == tenantId)
-            .Select(d => d.PropertyId)
-            .Distinct()
-            .ToListAsync();
-        return ids.ToHashSet();
-    }
-
-    private static bool IsAmountLocked(Payment payment, HashSet<Guid> plannedPropertyIds) =>
-        !payment.InstallmentDueId.HasValue && payment.PropertyId.HasValue
-        && plannedPropertyIds.Contains(payment.PropertyId.Value);
-
-    private async Task<bool> IsAmountLockedAsync(Payment payment, Guid tenantId) =>
-        !payment.InstallmentDueId.HasValue && payment.PropertyId.HasValue
-        && await db.InstallmentDues.AnyAsync(d => d.TenantId == tenantId && d.PropertyId == payment.PropertyId);
-
     private async Task LoadRefs(Payment payment)
     {
         await db.Entry(payment).Reference(p => p.Client).LoadAsync();
@@ -264,7 +324,7 @@ public class PaymentsController(AppDbContext db) : ControllerBase
         if (req.ClientId is null || req.PropertyId is null)
             return (0, 0, "Client and property are required.");
 
-        var clientExists = await db.Clients.AnyAsync(c => c.Id == req.ClientId && c.TenantId == tenantId);
+        var clientExists = await db.Clients.AnyAsync(c => c.Id == req.ClientId && c.TenantId == tenantId && !c.IsDeleted);
         if (!clientExists) return (0, 0, "The selected client was not found.");
 
         var property = await db.Properties.FirstOrDefaultAsync(
@@ -308,7 +368,8 @@ public class PaymentsController(AppDbContext db) : ControllerBase
         if (req.InstallmentSchedule.Sum(item => item.Amount) != remaining - paymentAmount)
             return $"The installment schedule must total {(remaining - paymentAmount):N0}.";
         if (req.PropertyId.HasValue && await db.InstallmentDues.AnyAsync(d =>
-            d.TenantId == tenantId && d.PropertyId == req.PropertyId))
+            d.TenantId == tenantId && d.PropertyId == req.PropertyId && d.Status != "cancelled"
+            && d.Property != null && d.ClientId == d.Property.ClientId))
             return "This property already has an installment plan.";
         return null;
     }
@@ -355,9 +416,9 @@ public class PaymentsController(AppDbContext db) : ControllerBase
         return p;
     }
 
-    private static PaymentDto ToDto(Payment p, bool amountLocked = false) => new(
+    private static PaymentDto ToDto(Payment p) => new(
         p.Id, p.ReceiptNo, p.ClientId, p.PropertyId, p.Amount, p.PaymentDate, p.Notes, p.CreatedAt,
-        ToClientDto(p.Client), ToPropertyDto(p.Property), amountLocked);
+        ToClientDto(p.Client), ToPropertyDto(p.Property));
 
     private static ClientDto? ToClientDto(Client? client) => client is null ? null : new ClientDto(
         client.Id, client.Name, client.Cnic, client.Phone, client.Address,

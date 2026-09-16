@@ -9,8 +9,10 @@ public class Client
     public string? Phone { get; set; }
     public string? Address { get; set; }
     public string? FatherHusband { get; set; }
+    public string? Caste { get; set; }
     public string? Notes { get; set; }
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
+    public bool IsDeleted { get; set; }
 
     public Tenant? Tenant { get; set; }
     public ICollection<Property> Properties { get; set; } = new List<Property>();

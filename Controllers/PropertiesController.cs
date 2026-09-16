@@ -88,6 +88,8 @@ public class PropertiesController(AppDbContext db) : ControllerBase
         p.PropertyNumber = req.PropertyNumber.Trim();
         p.PropertyType = req.PropertyType;
         p.Marla = req.Marla;
+        p.LengthFeet = req.LengthFeet;
+        p.WidthFeet = req.WidthFeet;
         p.TotalPrice = req.TotalPrice;
         p.BookingDate = req.BookingDate;
         p.Notes = req.Notes;
@@ -97,5 +99,6 @@ public class PropertiesController(AppDbContext db) : ControllerBase
     private static PropertyDto ToDto(Property p) => new(
         p.Id, p.PropertyNumber, p.PropertyType, p.Marla, p.TotalPrice,
         p.BookingDate, p.Status, p.ClientId, p.Notes, p.CreatedAt,
-        p.Client is null ? null : new ClientDto(p.Client.Id, p.Client.Name, p.Client.Cnic, p.Client.Phone, p.Client.Address, p.Client.FatherHusband, p.Client.Notes, p.Client.CreatedAt));
+        p.Client is null ? null : new ClientDto(p.Client.Id, p.Client.Name, p.Client.Cnic, p.Client.Phone, p.Client.Address, p.Client.FatherHusband, p.Client.Notes, p.Client.CreatedAt),
+        p.LengthFeet, p.WidthFeet);
 }

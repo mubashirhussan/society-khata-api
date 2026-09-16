@@ -7,6 +7,8 @@ public class Property
     public string PropertyNumber { get; set; } = string.Empty;
     public string PropertyType { get; set; } = "plot";
     public decimal? Marla { get; set; }
+    public decimal? LengthFeet { get; set; }
+    public decimal? WidthFeet { get; set; }
     public decimal TotalPrice { get; set; }
     public DateOnly? BookingDate { get; set; }
     public string Status { get; set; } = "available";

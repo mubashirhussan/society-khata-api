@@ -8,6 +8,7 @@ public class Payment
     public Guid? ClientId { get; set; }
     public Guid? PropertyId { get; set; }
     public Guid? InstallmentDueId { get; set; }
+    public Guid? SourcePaymentId { get; set; }
     public decimal Amount { get; set; }
     public DateOnly PaymentDate { get; set; } = DateOnly.FromDateTime(DateTime.UtcNow);
     public string? Notes { get; set; }

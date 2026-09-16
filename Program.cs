@@ -120,6 +120,16 @@ using (var scope = app.Services.CreateScope())
             ADD COLUMN IF NOT EXISTS "IsDeleted" boolean NOT NULL DEFAULT false;
         ALTER TABLE "Properties"
             ADD COLUMN IF NOT EXISTS "IsDeleted" boolean NOT NULL DEFAULT false;
+        ALTER TABLE "Clients"
+            ADD COLUMN IF NOT EXISTS "IsDeleted" boolean NOT NULL DEFAULT false;
+        ALTER TABLE "Clients"
+            ADD COLUMN IF NOT EXISTS "Caste" text NULL;
+        ALTER TABLE "Properties"
+            ADD COLUMN IF NOT EXISTS "LengthFeet" numeric NULL;
+        ALTER TABLE "Properties"
+            ADD COLUMN IF NOT EXISTS "WidthFeet" numeric NULL;
+        ALTER TABLE "Payments"
+            ADD COLUMN IF NOT EXISTS "SourcePaymentId" uuid NULL;
         ALTER TABLE "Tenants"
             ADD COLUMN IF NOT EXISTS "IsPlatformTenant" boolean NOT NULL DEFAULT false;
         ALTER TABLE "Users"
