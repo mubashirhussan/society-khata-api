@@ -12,6 +12,7 @@ public class Property
     public string Status { get; set; } = "available";
     public Guid? ClientId { get; set; }
     public string? Notes { get; set; }
+    public bool IsDeleted { get; set; }
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
 
     public Tenant? Tenant { get; set; }

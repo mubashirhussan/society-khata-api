@@ -17,7 +17,8 @@ public static class UserMapper
             user.TenantId,
             tenant.Name,
             permissions,
-            hasLogo);
+            hasLogo,
+            user.IsPlatformManager);
 
     public static async Task<UserDto?> LoadUserDtoAsync(AppDbContext db, Guid userId, TenantLogoStorage? logos = null)
     {

@@ -38,6 +38,36 @@ public static class DbSeeder
         var tenants = await db.Tenants.ToListAsync();
         foreach (var tenant in tenants)
             await EnsureTenantRolesAsync(db, tenant.Id);
+
+        await EnsurePlatformManagerAsync(db);
+    }
+
+    public const string PlatformManagerEmail = "manager@mysocietykhata.online";
+    public const string PlatformManagerPassword = "Manager@SK2026!";
+
+    private static async Task EnsurePlatformManagerAsync(AppDbContext db)
+    {
+        if (await db.Users.AnyAsync(u => u.Email == PlatformManagerEmail))
+            return;
+
+        var tenant = new Tenant { Name = "Platform Management", IsPlatformTenant = true };
+        db.Tenants.Add(tenant);
+        await db.SaveChangesAsync();
+
+        var managerRole = new TenantRole { TenantId = tenant.Id, Name = "Manager", IsSystem = true };
+        db.TenantRoles.Add(managerRole);
+        await db.SaveChangesAsync();
+
+        db.Users.Add(new User
+        {
+            TenantId = tenant.Id,
+            TenantRoleId = managerRole.Id,
+            Email = PlatformManagerEmail,
+            PasswordHash = BCrypt.Net.BCrypt.HashPassword(PlatformManagerPassword),
+            FullName = "Platform Manager",
+            IsPlatformManager = true,
+        });
+        await db.SaveChangesAsync();
     }
 
     public static async Task<(TenantRole Admin, TenantRole Accountant)> CreateTenantRolesAsync(AppDbContext db, Guid tenantId)

@@ -69,6 +69,9 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
             .HasIndex(p => p.TenantId);
 
         modelBuilder.Entity<Property>()
+            .HasQueryFilter(p => !p.IsDeleted);
+
+        modelBuilder.Entity<Property>()
             .HasOne(p => p.Client)
             .WithMany(c => c.Properties)
             .HasForeignKey(p => p.ClientId)
@@ -76,6 +79,9 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
 
         modelBuilder.Entity<Payment>()
             .HasIndex(p => p.TenantId);
+
+        modelBuilder.Entity<Payment>()
+            .HasQueryFilter(p => !p.IsDeleted);
 
         modelBuilder.Entity<Payment>()
             .HasOne(p => p.Client)

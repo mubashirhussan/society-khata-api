@@ -61,7 +61,7 @@ public class PropertiesController(AppDbContext db) : ControllerBase
     {
         var property = await FindAsync(id);
         if (property is null) return NotFound();
-        db.Properties.Remove(property);
+        property.IsDeleted = true;
         await db.SaveChangesAsync();
         return NoContent();
     }

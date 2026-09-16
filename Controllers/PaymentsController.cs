@@ -25,7 +25,8 @@ public class PaymentsController(AppDbContext db) : ControllerBase
             .Where(p => p.TenantId == tenantId)
             .OrderByDescending(p => p.PaymentDate)
             .ToListAsync();
-        return Ok(items.Select(ToDto).ToList());
+        var plannedPropertyIds = await GetPropertyIdsWithPlansAsync(tenantId);
+        return Ok(items.Select(p => ToDto(p, IsAmountLocked(p, plannedPropertyIds))).ToList());
     }
 
     [HttpGet("ledger")]
@@ -112,7 +113,7 @@ public class PaymentsController(AppDbContext db) : ControllerBase
         await SyncProperty(payment.PropertyId);
         await transaction.CommitAsync();
         await LoadRefs(payment);
-        return Ok(ToDto(payment));
+        return Ok(ToDto(payment, await IsAmountLockedAsync(payment, tenantId)));
     }
 
     [HttpPut("{id:guid}")]
@@ -155,7 +156,7 @@ public class PaymentsController(AppDbContext db) : ControllerBase
         await SyncProperty(oldPropertyId);
         if (payment.PropertyId != oldPropertyId) await SyncProperty(payment.PropertyId);
         await LoadRefs(payment);
-        return Ok(ToDto(payment));
+        return Ok(ToDto(payment, await IsAmountLockedAsync(payment, payment.TenantId)));
     }
 
     [HttpDelete("{id:guid}")]
@@ -172,7 +173,7 @@ public class PaymentsController(AppDbContext db) : ControllerBase
             return BadRequest(new { error = "The initial payment cannot be deleted while its installment plan exists." });
         if (linkedDue is not null)
             RemovePaymentFromDue(linkedDue, payment);
-        db.Payments.Remove(payment);
+        payment.IsDeleted = true;
         await db.SaveChangesAsync();
         await SyncProperty(propertyId);
         return NoContent();
@@ -230,6 +231,24 @@ public class PaymentsController(AppDbContext db) : ControllerBase
             due.PaymentId = null;
         }
     }
+
+    private async Task<HashSet<Guid>> GetPropertyIdsWithPlansAsync(Guid tenantId)
+    {
+        var ids = await db.InstallmentDues
+            .Where(d => d.TenantId == tenantId)
+            .Select(d => d.PropertyId)
+            .Distinct()
+            .ToListAsync();
+        return ids.ToHashSet();
+    }
+
+    private static bool IsAmountLocked(Payment payment, HashSet<Guid> plannedPropertyIds) =>
+        !payment.InstallmentDueId.HasValue && payment.PropertyId.HasValue
+        && plannedPropertyIds.Contains(payment.PropertyId.Value);
+
+    private async Task<bool> IsAmountLockedAsync(Payment payment, Guid tenantId) =>
+        !payment.InstallmentDueId.HasValue && payment.PropertyId.HasValue
+        && await db.InstallmentDues.AnyAsync(d => d.TenantId == tenantId && d.PropertyId == payment.PropertyId);
 
     private async Task LoadRefs(Payment payment)
     {
@@ -336,9 +355,9 @@ public class PaymentsController(AppDbContext db) : ControllerBase
         return p;
     }
 
-    private static PaymentDto ToDto(Payment p) => new(
+    private static PaymentDto ToDto(Payment p, bool amountLocked = false) => new(
         p.Id, p.ReceiptNo, p.ClientId, p.PropertyId, p.Amount, p.PaymentDate, p.Notes, p.CreatedAt,
-        ToClientDto(p.Client), ToPropertyDto(p.Property));
+        ToClientDto(p.Client), ToPropertyDto(p.Property), amountLocked);
 
     private static ClientDto? ToClientDto(Client? client) => client is null ? null : new ClientDto(
         client.Id, client.Name, client.Cnic, client.Phone, client.Address,

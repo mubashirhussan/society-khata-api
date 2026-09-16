@@ -48,6 +48,9 @@ builder.Services.AddAuthorization(options =>
         options.AddPolicy($"perm:{permission}", policy =>
             policy.Requirements.Add(new PermissionRequirement(permission)));
     }
+
+    options.AddPolicy("PlatformManager", policy =>
+        policy.RequireClaim("platform_manager", "true"));
 });
 
 builder.Services.AddCors(opt =>
@@ -113,6 +116,14 @@ using (var scope = app.Services.CreateScope())
             ON "InstallmentDues" ("PaymentId");
         CREATE INDEX IF NOT EXISTS "IX_Payments_InstallmentDueId"
             ON "Payments" ("InstallmentDueId");
+        ALTER TABLE "Payments"
+            ADD COLUMN IF NOT EXISTS "IsDeleted" boolean NOT NULL DEFAULT false;
+        ALTER TABLE "Properties"
+            ADD COLUMN IF NOT EXISTS "IsDeleted" boolean NOT NULL DEFAULT false;
+        ALTER TABLE "Tenants"
+            ADD COLUMN IF NOT EXISTS "IsPlatformTenant" boolean NOT NULL DEFAULT false;
+        ALTER TABLE "Users"
+            ADD COLUMN IF NOT EXISTS "IsPlatformManager" boolean NOT NULL DEFAULT false;
         """);
     await DbSeeder.SeedAsync(db);
 }

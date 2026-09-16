@@ -83,6 +83,9 @@ public class AuthService(AppDbContext db, IConfiguration config, PermissionServi
             new("role_id", user.TenantRoleId.ToString()),
         };
 
+        if (user.IsPlatformManager)
+            claims.Add(new Claim("platform_manager", "true"));
+
         foreach (var permission in permissionKeys)
             claims.Add(new Claim("permission", permission));
 

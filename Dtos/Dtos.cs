@@ -6,7 +6,8 @@ public record CreateUserRequest(string Email, string Password, Guid RoleId, stri
 public record AuthResponse(string Token, UserDto User);
 public record UserDto(
     Guid Id, string Email, Guid RoleId, string RoleName, string? FullName,
-    Guid TenantId, string TenantName, List<string> Permissions, bool HasLogo = false);
+    Guid TenantId, string TenantName, List<string> Permissions, bool HasLogo = false,
+    bool IsPlatformManager = false);
 public record UserListDto(Guid Id, string Email, Guid RoleId, string RoleName, string? FullName, bool IsActive, DateTime CreatedAt);
 
 public record PermissionDto(string Key, string Name, string Group);
@@ -27,7 +28,8 @@ public record PropertyRequest(
 
 public record PaymentDto(
     Guid Id, string? ReceiptNo, Guid? ClientId, Guid? PropertyId, decimal Amount,
-    DateOnly PaymentDate, string? Notes, DateTime CreatedAt, ClientDto? Client, PropertyDto? Property);
+    DateOnly PaymentDate, string? Notes, DateTime CreatedAt, ClientDto? Client, PropertyDto? Property,
+    bool AmountLocked = false);
 
 public record InstallmentScheduleItem(DateOnly DueDate, decimal Amount);
 
@@ -49,3 +51,6 @@ public record ExpenseRequest(string Description, decimal Amount, string? PaidTo,
 public record DashboardStatsDto(
     int TotalPlots, int TotalShops, int TotalSales, decimal TotalReceived,
     decimal TotalExpenses, int TotalProperties, decimal TotalPropertyValue, decimal TotalOutstanding);
+
+public record SocietyOverviewDto(Guid Id, string Name, string? Phone, DateTime CreatedAt, int UserCount);
+public record SocietiesOverviewResponse(int TotalCount, List<SocietyOverviewDto> Societies);

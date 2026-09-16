@@ -11,6 +11,7 @@ public class Payment
     public decimal Amount { get; set; }
     public DateOnly PaymentDate { get; set; } = DateOnly.FromDateTime(DateTime.UtcNow);
     public string? Notes { get; set; }
+    public bool IsDeleted { get; set; }
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
 
     public Tenant? Tenant { get; set; }

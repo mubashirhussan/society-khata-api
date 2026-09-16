@@ -15,6 +15,7 @@ public class User
     public string PasswordHash { get; set; } = string.Empty;
     public string? FullName { get; set; }
     public bool IsActive { get; set; } = true;
+    public bool IsPlatformManager { get; set; }
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
 
     public Tenant? Tenant { get; set; }
