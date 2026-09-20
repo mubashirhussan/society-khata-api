@@ -14,6 +14,7 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
     public DbSet<Property> Properties => Set<Property>();
     public DbSet<Payment> Payments => Set<Payment>();
     public DbSet<InstallmentDue> InstallmentDues => Set<InstallmentDue>();
+    public DbSet<PaymentInstallmentAllocation> PaymentInstallmentAllocations => Set<PaymentInstallmentAllocation>();
     public DbSet<Expense> Expenses => Set<Expense>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
@@ -125,6 +126,24 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
         modelBuilder.Entity<InstallmentDue>()
             .Property(d => d.AmountPaid)
             .HasPrecision(18, 2);
+
+        modelBuilder.Entity<PaymentInstallmentAllocation>()
+            .HasIndex(a => a.PaymentId);
+
+        modelBuilder.Entity<PaymentInstallmentAllocation>()
+            .HasIndex(a => a.InstallmentDueId);
+
+        modelBuilder.Entity<PaymentInstallmentAllocation>()
+            .HasOne(a => a.Payment)
+            .WithMany()
+            .HasForeignKey(a => a.PaymentId)
+            .OnDelete(DeleteBehavior.Cascade);
+
+        modelBuilder.Entity<PaymentInstallmentAllocation>()
+            .HasOne(a => a.InstallmentDue)
+            .WithMany()
+            .HasForeignKey(a => a.InstallmentDueId)
+            .OnDelete(DeleteBehavior.Cascade);
 
         modelBuilder.Entity<Expense>()
             .HasIndex(e => e.TenantId);

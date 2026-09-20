@@ -70,7 +70,7 @@ public static class DbSeeder
         await db.SaveChangesAsync();
     }
 
-    public static async Task<(TenantRole Admin, TenantRole Accountant)> CreateTenantRolesAsync(AppDbContext db, Guid tenantId)
+    public static async Task<(TenantRole Admin, TenantRole Accountant)> CreateTenantRolesAsync(AppDbContext db, int tenantId)
     {
         var adminRole = new TenantRole { TenantId = tenantId, Name = RoleNames.Admin, IsSystem = true };
         var accountantRole = new TenantRole { TenantId = tenantId, Name = RoleNames.Accountant, IsSystem = true };
@@ -84,7 +84,7 @@ public static class DbSeeder
         return (adminRole, accountantRole);
     }
 
-    public static async Task EnsureTenantRolesAsync(AppDbContext db, Guid tenantId)
+    public static async Task EnsureTenantRolesAsync(AppDbContext db, int tenantId)
     {
         if (await db.TenantRoles.AnyAsync(r => r.TenantId == tenantId))
             return;
@@ -92,7 +92,7 @@ public static class DbSeeder
         await CreateTenantRolesAsync(db, tenantId);
     }
 
-    public static async Task SetRolePermissionsAsync(AppDbContext db, Guid roleId, IEnumerable<string> keys)
+    public static async Task SetRolePermissionsAsync(AppDbContext db, int roleId, IEnumerable<string> keys)
     {
         var existing = await db.TenantRolePermissions.Where(rp => rp.TenantRoleId == roleId).ToListAsync();
         db.TenantRolePermissions.RemoveRange(existing);

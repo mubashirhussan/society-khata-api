@@ -2,8 +2,8 @@ namespace SocietyKhata.Api.Models;
 
 public class Client
 {
-    public Guid Id { get; set; } = Guid.NewGuid();
-    public Guid TenantId { get; set; }
+    public int Id { get; set; }
+    public int TenantId { get; set; }
     public string Name { get; set; } = string.Empty;
     public string? Cnic { get; set; }
     public string? Phone { get; set; }

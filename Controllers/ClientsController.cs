@@ -53,9 +53,9 @@ public class ClientsController(AppDbContext db, IWebHostEnvironment environment)
         return Ok(ToDto(client));
     }
 
-    [HttpPut("{id:guid}")]
+    [HttpPut("{id:int}")]
     [RequirePermission(PermissionKeys.PropertiesEdit)]
-    public async Task<ActionResult<ClientDto>> Update(Guid id, ClientRequest req)
+    public async Task<ActionResult<ClientDto>> Update(int id, ClientRequest req)
     {
         var client = await FindAsync(id);
         if (client is null) return NotFound();
@@ -71,11 +71,11 @@ public class ClientsController(AppDbContext db, IWebHostEnvironment environment)
         return Ok(ToDto(client));
     }
 
-    [HttpPost("{id:guid}/picture")]
+    [HttpPost("{id:int}/picture")]
     [RequirePermission(PermissionKeys.PropertiesCreate)]
     [Consumes("multipart/form-data")]
     [RequestSizeLimit(6 * 1024 * 1024)]
-    public async Task<ActionResult<ClientDto>> UploadPicture(Guid id, IFormFile? picture)
+    public async Task<ActionResult<ClientDto>> UploadPicture(int id, IFormFile? picture)
     {
         var client = await FindAsync(id);
         if (client is null) return NotFound();
@@ -95,9 +95,9 @@ public class ClientsController(AppDbContext db, IWebHostEnvironment environment)
         return Ok(ToDto(client));
     }
 
-    [HttpGet("{id:guid}/picture")]
+    [HttpGet("{id:int}/picture")]
     [RequirePermission(PermissionKeys.PropertiesView)]
-    public async Task<IActionResult> GetPicture(Guid id)
+    public async Task<IActionResult> GetPicture(int id)
     {
         var client = await FindAsync(id);
         if (client is null) return NotFound();
@@ -114,32 +114,42 @@ public class ClientsController(AppDbContext db, IWebHostEnvironment environment)
         return PhysicalFile(path, contentType);
     }
 
-    [HttpDelete("{id:guid}")]
+    [HttpDelete("{id:int}")]
     [RequirePermission(PermissionKeys.PropertiesDelete)]
-    public async Task<IActionResult> Delete(Guid id)
+    public async Task<IActionResult> Delete(int id)
     {
-        var client = await FindAsync(id);
-        if (client is null) return NotFound();
         var tenantId = User.GetTenantId();
+        // Deliberately not filtered by !IsDeleted: a client soft-deleted by an older, buggier
+        // version of this endpoint can be left with orphaned payments/dues never cleaned up.
+        // Re-running delete on that same client must finish the cleanup instead of 404ing,
+        // since IsDeleted = true again is a harmless no-op if it was already deleted properly.
+        var client = await db.Clients.FirstOrDefaultAsync(c => c.Id == id && c.TenantId == tenantId);
+        if (client is null) return NotFound();
 
         var properties = await db.Properties
             .Where(p => p.TenantId == tenantId && p.ClientId == id)
             .ToListAsync();
+        var propertyIds = properties.Select(p => p.Id).ToHashSet();
+
+        // Catch every payment tied to this client — whether through a property it currently
+        // owns, or directly via the payment's own ClientId. The two can drift apart (e.g. a
+        // property's ownership field getting reset while its payment history stays put), so
+        // relying on the property link alone can leave orphaned payments behind after delete.
+        var payments = await db.Payments
+            .Where(p => p.TenantId == tenantId
+                && (p.ClientId == id || (p.PropertyId.HasValue && propertyIds.Contains(p.PropertyId.Value))))
+            .ToListAsync();
+        foreach (var payment in payments)
+            payment.IsDeleted = true;
+
+        var pendingDues = await db.InstallmentDues
+            .Where(d => d.TenantId == tenantId && d.ClientId == id && d.Status == "pending")
+            .ToListAsync();
+        foreach (var due in pendingDues)
+            due.Status = "cancelled";
 
         foreach (var property in properties)
         {
-            var payments = await db.Payments
-                .Where(p => p.TenantId == tenantId && p.PropertyId == property.Id)
-                .ToListAsync();
-            foreach (var payment in payments)
-                payment.IsDeleted = true;
-
-            var pendingDues = await db.InstallmentDues
-                .Where(d => d.TenantId == tenantId && d.PropertyId == property.Id && d.Status == "pending")
-                .ToListAsync();
-            foreach (var due in pendingDues)
-                due.Status = "cancelled";
-
             property.Status = "available";
             property.ClientId = null;
             property.BookingDate = null;
@@ -151,13 +161,13 @@ public class ClientsController(AppDbContext db, IWebHostEnvironment environment)
         return NoContent();
     }
 
-    private async Task<Client?> FindAsync(Guid id) =>
+    private async Task<Client?> FindAsync(int id) =>
         await db.Clients.FirstOrDefaultAsync(c => c.Id == id && c.TenantId == User.GetTenantId() && !c.IsDeleted);
 
     private ClientDto ToDto(Client c) =>
         new(c.Id, c.Name, c.Cnic, c.Phone, c.Address, c.FatherHusband, c.Notes, c.CreatedAt, FindPicturePath(c) is not null, c.Caste);
 
-    private string GetPictureDirectory(Guid tenantId) =>
+    private string GetPictureDirectory(int tenantId) =>
         Path.Combine(environment.ContentRootPath, "uploads", "client-pictures", tenantId.ToString());
 
     private string? FindPicturePath(Client client)

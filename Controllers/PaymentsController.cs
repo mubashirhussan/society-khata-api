@@ -37,14 +37,15 @@ public class PaymentsController(AppDbContext db) : ControllerBase
         var payments = await db.Payments
             .Include(p => p.Client)
             .Include(p => p.Property)
-            .Where(p => p.TenantId == tenantId)
+            .Where(p => p.TenantId == tenantId && (p.Client == null || !p.Client.IsDeleted))
             .OrderByDescending(p => p.PaymentDate)
             .ToListAsync();
         var dues = await db.InstallmentDues
             .Include(d => d.Client)
             .Include(d => d.Property)
             .Where(d => d.TenantId == tenantId && d.Status == "pending"
-                && d.Property != null && d.ClientId == d.Property.ClientId)
+                && d.Property != null && d.ClientId == d.Property.ClientId
+                && (d.Client == null || !d.Client.IsDeleted))
             .OrderBy(d => d.DueDate)
             .ToListAsync();
 
@@ -58,6 +59,198 @@ public class PaymentsController(AppDbContext db) : ControllerBase
             p.Amount, p.PaymentDate, p.Notes, p.Id, null,
             ToClientDto(p.Client), ToPropertyDto(p.Property))));
         return Ok(rows);
+    }
+
+    // One aggregated call for the payments list screen: a per-client summary row
+    // (totals + pending) computed server-side instead of shipping every payment,
+    // ledger row, client and property to the browser for it to group there.
+    [HttpGet("summary")]
+    [RequirePermission(PermissionKeys.PaymentsView)]
+    public async Task<ActionResult<List<PaymentClientSummaryDto>>> Summary()
+    {
+        var tenantId = User.GetTenantId();
+        var payments = await db.Payments
+            .Include(p => p.Client)
+            .Include(p => p.Property)
+            .Where(p => p.TenantId == tenantId && (p.Client == null || !p.Client.IsDeleted))
+            .ToListAsync();
+        var dues = await db.InstallmentDues
+            .Include(d => d.Client)
+            .Include(d => d.Property)
+            .Where(d => d.TenantId == tenantId && d.Status == "pending"
+                && d.Property != null && d.ClientId == d.Property.ClientId
+                && (d.Client == null || !d.Client.IsDeleted))
+            .ToListAsync();
+
+        var groups = new Dictionary<int, ClientAggregate>();
+        foreach (var payment in payments)
+        {
+            var clientId = payment.ClientId ?? payment.Property?.ClientId;
+            var client = payment.Client;
+            if (clientId is null || client is null) continue;
+
+            if (!groups.TryGetValue(clientId.Value, out var agg))
+            {
+                agg = new ClientAggregate { Client = client, LastPaymentDate = payment.PaymentDate };
+                groups[clientId.Value] = agg;
+            }
+            agg.TotalReceived += payment.Amount;
+            if (payment.Property is not null)
+            {
+                agg.PropertyNumbers.Add(payment.Property.PropertyNumber);
+                agg.PropertyIds.Add(payment.Property.Id);
+                agg.PropertyPrices[payment.Property.Id] = payment.Property.TotalPrice;
+            }
+            if (payment.PaymentDate > agg.LastPaymentDate) agg.LastPaymentDate = payment.PaymentDate;
+        }
+
+        // A client can still owe a scheduled installment after every payment toward it has
+        // been deleted (the plan itself isn't removed). Without this, that client would
+        // disappear from this list even though their own detail page still shows the plan.
+        foreach (var due in dues)
+        {
+            if (due.Client is null) continue;
+            if (!groups.TryGetValue(due.ClientId, out var agg))
+            {
+                agg = new ClientAggregate { Client = due.Client, LastPaymentDate = due.DueDate };
+                groups[due.ClientId] = agg;
+            }
+            if (due.Property is not null)
+            {
+                agg.PropertyNumbers.Add(due.Property.PropertyNumber);
+                agg.PropertyIds.Add(due.Property.Id);
+                agg.PropertyPrices[due.Property.Id] = due.Property.TotalPrice;
+            }
+        }
+
+        var result = new List<PaymentClientSummaryDto>();
+        foreach (var (clientId, agg) in groups)
+        {
+            var scheduledPropertyIds = dues
+                .Where(d => d.ClientId == clientId)
+                .Select(d => d.PropertyId)
+                .ToHashSet();
+            var scheduledPending = dues.Where(d => d.ClientId == clientId).Sum(d => d.RemainingAmount);
+
+            var paidByProperty = payments
+                .Where(p => p.PropertyId.HasValue && agg.PropertyIds.Contains(p.PropertyId.Value))
+                .GroupBy(p => p.PropertyId!.Value)
+                .ToDictionary(g => g.Key, g => g.Sum(p => p.Amount));
+
+            var unscheduledPending = agg.PropertyIds
+                .Where(id => !scheduledPropertyIds.Contains(id))
+                .Sum(id => Math.Max(0, agg.PropertyPrices.GetValueOrDefault(id) - paidByProperty.GetValueOrDefault(id)));
+
+            var totalPlotAmount = agg.PropertyIds.Sum(id => agg.PropertyPrices.GetValueOrDefault(id));
+
+            result.Add(new PaymentClientSummaryDto(
+                clientId, ToClientDto(agg.Client)!, agg.PropertyNumbers.ToList(),
+                totalPlotAmount, agg.TotalReceived, scheduledPending + unscheduledPending, agg.LastPaymentDate));
+        }
+
+        return Ok(result.OrderByDescending(r => r.LastPaymentDate).ToList());
+    }
+
+    private sealed class ClientAggregate
+    {
+        public required Client Client { get; init; }
+        public DateOnly LastPaymentDate { get; set; }
+        public decimal TotalReceived { get; set; }
+        public HashSet<string> PropertyNumbers { get; } = [];
+        public HashSet<int> PropertyIds { get; } = [];
+        public Dictionary<int, decimal> PropertyPrices { get; } = [];
+    }
+
+    // Detail screen for one client, scoped in the query itself instead of pulling
+    // every tenant payment/ledger/client row to the browser and filtering there.
+    [HttpGet("client/{clientId:int}")]
+    [RequirePermission(PermissionKeys.PaymentsView)]
+    public async Task<ActionResult<PaymentClientDetailDto>> ClientDetail(int clientId)
+    {
+        var tenantId = User.GetTenantId();
+        var today = DateOnly.FromDateTime(DateTime.UtcNow);
+
+        var client = await db.Clients.FirstOrDefaultAsync(c => c.Id == clientId && c.TenantId == tenantId && !c.IsDeleted);
+        if (client is null) return NotFound();
+
+        var directPayments = await db.Payments
+            .Include(p => p.Client)
+            .Include(p => p.Property)
+            .Where(p => p.TenantId == tenantId && p.ClientId == clientId)
+            .ToListAsync();
+
+        var propertyIds = directPayments
+            .Where(p => p.PropertyId.HasValue)
+            .Select(p => p.PropertyId!.Value)
+            .Distinct()
+            .ToList();
+
+        // legacy payments recorded on the same property without a client id
+        var relatedPayments = propertyIds.Count == 0
+            ? []
+            : await db.Payments
+                .Include(p => p.Client)
+                .Include(p => p.Property)
+                .Where(p => p.TenantId == tenantId && p.ClientId == null
+                    && p.PropertyId.HasValue && propertyIds.Contains(p.PropertyId.Value))
+                .ToListAsync();
+
+        var payments = directPayments.Concat(relatedPayments)
+            .OrderByDescending(p => p.PaymentDate)
+            .ToList();
+
+        var scheduledInstallments = await db.InstallmentDues
+            .Include(d => d.Property)
+            .Where(d => d.TenantId == tenantId && d.Status == "pending" && d.ClientId == clientId)
+            .OrderBy(d => d.DueDate)
+            .ToListAsync();
+        var scheduledPropertyIds = scheduledInstallments.Select(d => d.PropertyId).ToHashSet();
+
+        var clientPropertyIds = payments
+            .Where(p => p.PropertyId.HasValue)
+            .Select(p => p.PropertyId!.Value)
+            .Distinct();
+
+        var unscheduledBalances = new List<PendingInstallmentDto>();
+        foreach (var propertyId in clientPropertyIds)
+        {
+            if (scheduledPropertyIds.Contains(propertyId)) continue;
+            var property = payments.First(p => p.PropertyId == propertyId).Property;
+            var paid = payments.Where(p => p.PropertyId == propertyId).Sum(p => p.Amount);
+            var remaining = Math.Max(0, (property?.TotalPrice ?? paid) - paid);
+            if (remaining <= 0) continue;
+            unscheduledBalances.Add(new PendingInstallmentDto(
+                -propertyId, null, propertyId, ToPropertyDto(property), remaining, "pending"));
+        }
+
+        var pendingInstallments = scheduledInstallments
+            .Select(d => new PendingInstallmentDto(
+                d.Id, d.DueDate, d.PropertyId, ToPropertyDto(d.Property),
+                d.RemainingAmount, d.DueDate < today ? "overdue" : "pending"))
+            .Concat(unscheduledBalances)
+            .ToList();
+
+        var propertyTotals = new Dictionary<int, decimal>();
+        foreach (var p in payments)
+            if (p.Property is not null) propertyTotals[p.Property.Id] = p.Property.TotalPrice;
+        foreach (var pi in pendingInstallments)
+            if (pi.Property is not null) propertyTotals[pi.Property.Id] = pi.Property.TotalPrice;
+
+        var planFrequencies = scheduledInstallments
+            .Select(d => d.PlanFrequency)
+            .Where(f => !string.IsNullOrWhiteSpace(f))
+            .Select(f => f!)
+            .Distinct()
+            .ToList();
+
+        return Ok(new PaymentClientDetailDto(
+            ToClientDto(client)!,
+            payments.Select(p => ToDto(p)).ToList(),
+            pendingInstallments,
+            propertyTotals.Values.Sum(),
+            payments.Sum(p => p.Amount),
+            pendingInstallments.Sum(p => p.Amount),
+            planFrequencies));
     }
 
     [HttpPost]
@@ -113,7 +306,7 @@ public class PaymentsController(AppDbContext db) : ControllerBase
         var payment = Map(new Payment { TenantId = tenantId }, req, validation.Amount);
         db.Payments.Add(payment);
         if (linkedDue is not null)
-            ApplyPaymentWithOverflow(payment, overflowChain, validation.Amount, tenantId);
+            ApplyPaymentToSchedule(payment, overflowChain, validation.Amount, tenantId);
         else if (req.InstallmentSchedule is { Count: > 0 })
         {
             db.InstallmentDues.AddRange(req.InstallmentSchedule.Select(item => new InstallmentDue
@@ -133,9 +326,9 @@ public class PaymentsController(AppDbContext db) : ControllerBase
         return Ok(ToDto(payment));
     }
 
-    [HttpPut("{id:guid}")]
+    [HttpPut("{id:int}")]
     [RequirePermission(PermissionKeys.PaymentsEdit)]
-    public async Task<ActionResult<PaymentDto>> Update(Guid id, PaymentRequest req)
+    public async Task<ActionResult<PaymentDto>> Update(int id, PaymentRequest req)
     {
         var payment = await FindAsync(id);
         if (payment is null) return NotFound();
@@ -143,28 +336,40 @@ public class PaymentsController(AppDbContext db) : ControllerBase
             return BadRequest(new { error = "An installment plan cannot be replaced while editing a receipt." });
 
         var linkedDue = await FindLinkedDueAsync(payment);
-        if (linkedDue is not null)
-        {
-            if (req.ClientId != linkedDue.ClientId || req.PropertyId != linkedDue.PropertyId)
-                return BadRequest(new { error = "A scheduled installment's client and property cannot be changed." });
-            var maxAllowed = linkedDue.RemainingAmount + payment.Amount;
-            if (req.Amount <= 0)
-                return BadRequest(new { error = "Payment amount must be greater than zero." });
-            if (req.Amount > maxAllowed)
-                return BadRequest(new { error = $"Payment cannot exceed the remaining installment of {maxAllowed:N0}." });
-        }
+        if (linkedDue is not null && (req.ClientId != linkedDue.ClientId || req.PropertyId != linkedDue.PropertyId))
+            return BadRequest(new { error = "A scheduled installment's client and property cannot be changed." });
 
         var oldPropertyId = payment.PropertyId;
         var oldAmount = payment.Amount;
         var validation = await ValidateAndCalculateAmount(req, payment.TenantId, payment.Id);
         if (validation.Error is not null) return BadRequest(new { error = validation.Error });
 
-        // A payment linked to one specific installment stays capped to that installment (see
-        // maxAllowed above) — spreading an edit across several installments would mean creating
-        // new Payment rows every time the receipt is saved, duplicating money on every re-edit.
-        // Only a standalone (not tied to one installment) payment can absorb extra amount into
-        // other pending installments, since that just adjusts their AmountPaid directly with no
-        // new rows involved.
+        await using var transaction = await db.Database.BeginTransactionAsync();
+
+        // A payment tied to the schedule may have overflowed across several installments
+        // when it was made. To edit it correctly we undo exactly what it contributed (via
+        // its recorded allocations, not a guess), then re-apply the new amount fresh across
+        // the same chain — rather than only touching the one due it was originally linked to.
+        var chain = new List<InstallmentDue>();
+        if (linkedDue is not null)
+        {
+            await ReversePaymentFromScheduleAsync(payment, linkedDue);
+            await db.SaveChangesAsync();
+
+            chain.Add(linkedDue);
+            chain.AddRange(await db.InstallmentDues
+                .Where(d => d.TenantId == payment.TenantId && d.PropertyId == linkedDue.PropertyId
+                    && d.ClientId == linkedDue.ClientId && d.Status == "pending" && d.Id != linkedDue.Id)
+                .OrderBy(d => d.DueDate)
+                .ToListAsync());
+
+            var capacity = chain.Sum(d => d.RemainingAmount);
+            if (validation.Amount > capacity)
+                return BadRequest(new { error = $"Payment cannot exceed the total remaining balance of {capacity:N0} across pending installments." });
+        }
+
+        // Only a standalone (not tied to one installment) payment can absorb extra amount
+        // into other pending installments, since that just adjusts their AmountPaid directly.
         var overflowDues = new List<InstallmentDue>();
         var extraToApply = 0m;
         if (linkedDue is null && req.PropertyId.HasValue && validation.Amount > oldAmount)
@@ -182,7 +387,7 @@ public class PaymentsController(AppDbContext db) : ControllerBase
         }
 
         if (linkedDue is not null)
-            AdjustDueForPaymentEdit(linkedDue, payment, validation.Amount);
+            ApplyPaymentToSchedule(payment, chain, validation.Amount, payment.TenantId);
         else if (extraToApply > 0)
             ApplyAmountToDueChain(payment, overflowDues, extraToApply);
 
@@ -190,27 +395,30 @@ public class PaymentsController(AppDbContext db) : ControllerBase
         await db.SaveChangesAsync();
         await SyncProperty(oldPropertyId);
         if (payment.PropertyId != oldPropertyId) await SyncProperty(payment.PropertyId);
+        await transaction.CommitAsync();
         await LoadRefs(payment);
         return Ok(ToDto(payment));
     }
 
-    [HttpDelete("{id:guid}")]
+    [HttpDelete("{id:int}")]
     [RequirePermission(PermissionKeys.PaymentsDelete)]
-    public async Task<IActionResult> Delete(Guid id)
+    public async Task<IActionResult> Delete(int id)
     {
         var payment = await FindAsync(id);
         if (payment is null) return NotFound();
         var propertyId = payment.PropertyId;
         var linkedDue = await FindLinkedDueAsync(payment);
         if (linkedDue is not null)
-            RemovePaymentFromDue(linkedDue, payment);
+            await ReversePaymentFromScheduleAsync(payment, linkedDue);
+        else
+            await ReopenScheduleForDeletedAdvanceAsync(payment);
         payment.IsDeleted = true;
         await db.SaveChangesAsync();
         await SyncProperty(propertyId);
         return NoContent();
     }
 
-    private async Task<Payment?> FindAsync(Guid id) =>
+    private async Task<Payment?> FindAsync(int id) =>
         await db.Payments.FirstOrDefaultAsync(p => p.Id == id && p.TenantId == User.GetTenantId());
 
     private async Task<InstallmentDue?> FindLinkedDueAsync(Payment payment)
@@ -225,43 +433,28 @@ public class PaymentsController(AppDbContext db) : ControllerBase
             d.TenantId == payment.TenantId && d.PaymentId == payment.Id);
     }
 
-    private static void ApplyPaymentToDue(InstallmentDue due, Payment payment, decimal amount)
+    // Applies one receipt's amount across a chain of pending dues (starting from the due the
+    // receipt targets), recording exactly how much landed on each one. A single receipt stays
+    // a single Payment row even when it overflows into later installments — only the ledger
+    // rows underneath track the split, so the receipt list never fragments into duplicates.
+    private void ApplyPaymentToSchedule(Payment payment, List<InstallmentDue> dueChain, decimal totalAmount, int tenantId)
     {
-        payment.InstallmentDueId = due.Id;
-        due.AmountPaid += amount;
-        SyncDueStatus(due, payment.Id);
-    }
-
-    private void ApplyPaymentWithOverflow(Payment payment, List<InstallmentDue> dueChain, decimal totalAmount, Guid tenantId)
-    {
+        payment.InstallmentDueId = dueChain[0].Id;
         var remaining = totalAmount;
-        for (var i = 0; i < dueChain.Count && remaining > 0; i++)
+        foreach (var due in dueChain)
         {
-            var due = dueChain[i];
+            if (remaining <= 0) break;
             var portion = Math.Min(remaining, due.RemainingAmount);
-
-            if (i == 0)
+            if (portion <= 0) continue;
+            due.AmountPaid += portion;
+            SyncDueStatus(due, payment);
+            db.PaymentInstallmentAllocations.Add(new PaymentInstallmentAllocation
             {
-                payment.Amount = portion;
-                ApplyPaymentToDue(due, payment, portion);
-            }
-            else
-            {
-                var overflowPayment = new Payment
-                {
-                    TenantId = tenantId,
-                    ReceiptNo = payment.ReceiptNo,
-                    ClientId = payment.ClientId,
-                    PropertyId = payment.PropertyId,
-                    Amount = portion,
-                    PaymentDate = payment.PaymentDate,
-                    Notes = payment.Notes,
-                    SourcePaymentId = payment.Id,
-                };
-                db.Payments.Add(overflowPayment);
-                ApplyPaymentToDue(due, overflowPayment, portion);
-            }
-
+                TenantId = tenantId,
+                Payment = payment,
+                InstallmentDueId = due.Id,
+                Amount = portion,
+            });
             remaining -= portion;
         }
     }
@@ -274,34 +467,72 @@ public class PaymentsController(AppDbContext db) : ControllerBase
             if (remaining <= 0) break;
             var portion = Math.Min(remaining, due.RemainingAmount);
             due.AmountPaid += portion;
-            SyncDueStatus(due, payment.Id);
+            SyncDueStatus(due, payment);
             remaining -= portion;
         }
     }
 
-    private static void AdjustDueForPaymentEdit(InstallmentDue due, Payment payment, decimal newAmount)
+    // Undoes exactly what this payment contributed to the schedule using its recorded
+    // allocations (correct even if it overflowed across several dues), falling back to the
+    // old single-due math only for payments created before allocations were tracked.
+    private async Task ReversePaymentFromScheduleAsync(Payment payment, InstallmentDue fallbackDue)
     {
-        due.AmountPaid = Math.Max(0, due.AmountPaid - payment.Amount + newAmount);
-        payment.InstallmentDueId = due.Id;
-        SyncDueStatus(due, payment.Id);
+        var allocations = await db.PaymentInstallmentAllocations
+            .Include(a => a.InstallmentDue)
+            .Where(a => a.PaymentId == payment.Id)
+            .ToListAsync();
+
+        if (allocations.Count == 0)
+        {
+            fallbackDue.AmountPaid = Math.Max(0, fallbackDue.AmountPaid - payment.Amount);
+            if (fallbackDue.PaymentId == payment.Id) fallbackDue.PaymentId = null;
+            SyncDueStatus(fallbackDue, completingPayment: null);
+            return;
+        }
+
+        foreach (var allocation in allocations)
+        {
+            var due = allocation.InstallmentDue;
+            if (due is null) continue;
+            due.AmountPaid = Math.Max(0, due.AmountPaid - allocation.Amount);
+            if (due.PaymentId == payment.Id) due.PaymentId = null;
+            SyncDueStatus(due, completingPayment: null);
+        }
+        db.PaymentInstallmentAllocations.RemoveRange(allocations);
     }
 
-    private static void RemovePaymentFromDue(InstallmentDue due, Payment payment)
+    // The payment that originally founded an installment schedule (its "advance") never
+    // touches any due row directly — its amount is simply netted out of the schedule's total
+    // at creation time (schedule sum = remaining - advance). Deleting that payment later must
+    // add an equivalent new pending installment back, otherwise the schedule keeps assuming
+    // money was collected that no longer was.
+    private async Task ReopenScheduleForDeletedAdvanceAsync(Payment payment)
     {
-        due.AmountPaid = Math.Max(0, due.AmountPaid - payment.Amount);
-        if (due.PaymentId == payment.Id)
-            due.PaymentId = null;
-        SyncDueStatus(due, completingPaymentId: null);
+        if (payment.PropertyId is null || payment.ClientId is null || payment.Amount <= 0) return;
+
+        var hasSchedule = await db.InstallmentDues.AnyAsync(d =>
+            d.TenantId == payment.TenantId && d.PropertyId == payment.PropertyId
+            && d.ClientId == payment.ClientId && d.Status != "cancelled");
+        if (!hasSchedule) return;
+
+        db.InstallmentDues.Add(new InstallmentDue
+        {
+            TenantId = payment.TenantId,
+            ClientId = payment.ClientId.Value,
+            PropertyId = payment.PropertyId.Value,
+            DueDate = payment.PaymentDate,
+            Amount = payment.Amount,
+        });
     }
 
-    private static void SyncDueStatus(InstallmentDue due, Guid? completingPaymentId)
+    private static void SyncDueStatus(InstallmentDue due, Payment? completingPayment)
     {
         if (due.AmountPaid >= due.Amount)
         {
             due.AmountPaid = due.Amount;
             due.Status = "paid";
-            if (completingPaymentId.HasValue)
-                due.PaymentId = completingPaymentId;
+            if (completingPayment is not null)
+                due.Payment = completingPayment;
         }
         else
         {
@@ -318,8 +549,8 @@ public class PaymentsController(AppDbContext db) : ControllerBase
 
     private async Task<(decimal Amount, decimal Remaining, string? Error)> ValidateAndCalculateAmount(
         PaymentRequest req,
-        Guid tenantId,
-        Guid? excludedPaymentId = null)
+        int tenantId,
+        int? excludedPaymentId = null)
     {
         if (req.ClientId is null || req.PropertyId is null)
             return (0, 0, "Client and property are required.");
@@ -351,7 +582,7 @@ public class PaymentsController(AppDbContext db) : ControllerBase
     }
 
     private async Task<string?> ValidateSchedule(
-        PaymentRequest req, Guid tenantId, decimal remaining, decimal paymentAmount)
+        PaymentRequest req, int tenantId, decimal remaining, decimal paymentAmount)
     {
         if (req.InstallmentSchedule is not { Count: > 0 }) return null;
         if (!string.Equals(req.PaymentMethod, "installment", StringComparison.OrdinalIgnoreCase))
@@ -374,7 +605,7 @@ public class PaymentsController(AppDbContext db) : ControllerBase
         return null;
     }
 
-    private async Task SyncProperty(Guid? propertyId)
+    private async Task SyncProperty(int? propertyId)
     {
         if (propertyId is null) return;
 
@@ -389,7 +620,17 @@ public class PaymentsController(AppDbContext db) : ControllerBase
             .ToListAsync();
         var totalPaid = payments.Sum(p => p.Amount);
 
-        if (totalPaid <= 0)
+        // A payment can be deleted (e.g. entered by mistake) without cancelling the
+        // installment plan built on top of it. Only clear the property's owner once
+        // neither a payment nor an active plan claims it — otherwise the property looks
+        // "available" while its old client still owes a pending schedule, which lets a
+        // second plan get created on the same property and doubles up the pending total.
+        var activeDue = await db.InstallmentDues
+            .Where(d => d.TenantId == tenantId && d.PropertyId == propertyId && d.Status != "cancelled")
+            .OrderBy(d => d.DueDate)
+            .FirstOrDefaultAsync();
+
+        if (totalPaid <= 0 && activeDue is null)
         {
             property.Status = "available";
             property.ClientId = null;
@@ -398,8 +639,8 @@ public class PaymentsController(AppDbContext db) : ControllerBase
         else
         {
             property.Status = totalPaid >= property.TotalPrice ? "sold" : "booked";
-            property.ClientId = payments[0].ClientId;
-            property.BookingDate = payments[0].PaymentDate;
+            property.ClientId = payments.Count > 0 ? payments[0].ClientId : activeDue!.ClientId;
+            property.BookingDate = payments.Count > 0 ? payments[0].PaymentDate : activeDue!.DueDate;
         }
 
         await db.SaveChangesAsync();

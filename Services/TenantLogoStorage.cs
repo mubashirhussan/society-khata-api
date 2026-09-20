@@ -11,10 +11,10 @@ public class TenantLogoStorage(IWebHostEnvironment environment)
 
     public IReadOnlyDictionary<string, string> AllowedContentTypes => Extensions;
 
-    public string GetDirectory(Guid tenantId) =>
+    public string GetDirectory(int tenantId) =>
         Path.Combine(environment.ContentRootPath, "uploads", "tenant-logos", tenantId.ToString());
 
-    public string? FindPath(Guid tenantId)
+    public string? FindPath(int tenantId)
     {
         var directory = GetDirectory(tenantId);
         if (!Directory.Exists(directory)) return null;
@@ -24,9 +24,9 @@ public class TenantLogoStorage(IWebHostEnvironment environment)
             .FirstOrDefault(File.Exists);
     }
 
-    public bool HasLogo(Guid tenantId) => FindPath(tenantId) is not null;
+    public bool HasLogo(int tenantId) => FindPath(tenantId) is not null;
 
-    public async Task SaveAsync(Guid tenantId, IFormFile logo)
+    public async Task SaveAsync(int tenantId, IFormFile logo)
     {
         if (!Extensions.TryGetValue(logo.ContentType, out var extension))
             throw new InvalidOperationException("Only JPG, PNG, and WebP images are supported.");
@@ -40,7 +40,7 @@ public class TenantLogoStorage(IWebHostEnvironment environment)
         await logo.CopyToAsync(stream);
     }
 
-    public void Delete(Guid tenantId)
+    public void Delete(int tenantId)
     {
         var directory = GetDirectory(tenantId);
         if (!Directory.Exists(directory)) return;

@@ -36,9 +36,9 @@ public class RolesController(AppDbContext db) : ControllerBase
         return Ok(result);
     }
 
-    [HttpPut("{id:guid}/permissions")]
+    [HttpPut("{id:int}/permissions")]
     [RequirePermission(PermissionKeys.RolesManage)]
-    public async Task<ActionResult<RoleDto>> UpdatePermissions(Guid id, UpdateRolePermissionsRequest req)
+    public async Task<ActionResult<RoleDto>> UpdatePermissions(int id, UpdateRolePermissionsRequest req)
     {
         var tenantId = User.GetTenantId();
         var role = await db.TenantRoles.FirstOrDefaultAsync(r => r.Id == id && r.TenantId == tenantId);

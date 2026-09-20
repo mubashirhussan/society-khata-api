@@ -2,56 +2,67 @@ namespace SocietyKhata.Api.Dtos;
 
 public record RegisterRequest(string TenantName, string Email, string Password, string? FullName, string? Phone);
 public record LoginRequest(string Email, string Password);
-public record CreateUserRequest(string Email, string Password, Guid RoleId, string? FullName);
+public record CreateUserRequest(string Email, string Password, int RoleId, string? FullName);
 public record AuthResponse(string Token, UserDto User);
 public record UserDto(
-    Guid Id, string Email, Guid RoleId, string RoleName, string? FullName,
-    Guid TenantId, string TenantName, List<string> Permissions, bool HasLogo = false,
+    int Id, string Email, int RoleId, string RoleName, string? FullName,
+    int TenantId, string TenantName, List<string> Permissions, bool HasLogo = false,
     bool IsPlatformManager = false);
-public record UserListDto(Guid Id, string Email, Guid RoleId, string RoleName, string? FullName, bool IsActive, DateTime CreatedAt);
+public record UserListDto(int Id, string Email, int RoleId, string RoleName, string? FullName, bool IsActive, DateTime CreatedAt);
 
 public record PermissionDto(string Key, string Name, string Group);
 public record PermissionGroupDto(string Group, List<PermissionDto> Permissions);
-public record RoleDto(Guid Id, string Name, bool IsSystem, List<string> Permissions);
+public record RoleDto(int Id, string Name, bool IsSystem, List<string> Permissions);
 public record UpdateRolePermissionsRequest(List<string> PermissionKeys);
 
-public record ClientDto(Guid Id, string Name, string? Cnic, string? Phone, string? Address, string? FatherHusband, string? Notes, DateTime CreatedAt, bool HasPicture = false, string? Caste = null);
+public record ClientDto(int Id, string Name, string? Cnic, string? Phone, string? Address, string? FatherHusband, string? Notes, DateTime CreatedAt, bool HasPicture = false, string? Caste = null);
 public record ClientRequest(string Name, string? Cnic, string? Phone, string? Address, string? FatherHusband, string? Notes, string? Caste = null);
 
 public record PropertyDto(
-    Guid Id, string PropertyNumber, string PropertyType, decimal? Marla, decimal TotalPrice,
-    DateOnly? BookingDate, string Status, Guid? ClientId, string? Notes, DateTime CreatedAt, ClientDto? Client,
+    int Id, string PropertyNumber, string PropertyType, decimal? Marla, decimal TotalPrice,
+    DateOnly? BookingDate, string Status, int? ClientId, string? Notes, DateTime CreatedAt, ClientDto? Client,
     decimal? LengthFeet = null, decimal? WidthFeet = null);
 
 public record PropertyRequest(
     string PropertyNumber, string PropertyType, decimal? Marla, decimal TotalPrice,
-    DateOnly? BookingDate, string Status, Guid? ClientId, string? Notes,
+    DateOnly? BookingDate, string Status, int? ClientId, string? Notes,
     decimal? LengthFeet = null, decimal? WidthFeet = null);
 
 public record PaymentDto(
-    Guid Id, string? ReceiptNo, Guid? ClientId, Guid? PropertyId, decimal Amount,
+    int Id, string? ReceiptNo, int? ClientId, int? PropertyId, decimal Amount,
     DateOnly PaymentDate, string? Notes, DateTime CreatedAt, ClientDto? Client, PropertyDto? Property);
 
 public record InstallmentScheduleItem(DateOnly DueDate, decimal Amount);
 
 public record PaymentRequest(
-    string? ReceiptNo, Guid? ClientId, Guid? PropertyId, decimal Amount,
+    string? ReceiptNo, int? ClientId, int? PropertyId, decimal Amount,
     DateOnly PaymentDate, string? Notes, string PaymentMethod = "installment",
-    List<InstallmentScheduleItem>? InstallmentSchedule = null, Guid? InstallmentDueId = null,
+    List<InstallmentScheduleItem>? InstallmentSchedule = null, int? InstallmentDueId = null,
     string? PlanFrequency = null);
 
 public record PaymentLedgerDto(
-    Guid Id, string RowType, string Status, string? ReceiptNo,
-    Guid? ClientId, Guid? PropertyId, decimal Amount, DateOnly Date,
-    string? Notes, Guid? PaymentId, string? PlanFrequency,
+    int Id, string RowType, string Status, string? ReceiptNo,
+    int? ClientId, int? PropertyId, decimal Amount, DateOnly Date,
+    string? Notes, int? PaymentId, string? PlanFrequency,
     ClientDto? Client, PropertyDto? Property);
 
-public record ExpenseDto(Guid Id, string Description, decimal Amount, string? PaidTo, DateOnly ExpenseDate, string? Notes, DateTime CreatedAt);
+public record PaymentClientSummaryDto(
+    int ClientId, ClientDto Client, List<string> PropertyNumbers,
+    decimal TotalPlotAmount, decimal TotalReceived, decimal PendingAmount, DateOnly LastPaymentDate);
+
+public record PendingInstallmentDto(
+    int Id, DateOnly? Date, int? PropertyId, PropertyDto? Property, decimal Amount, string Status);
+
+public record PaymentClientDetailDto(
+    ClientDto Client, List<PaymentDto> Payments, List<PendingInstallmentDto> PendingInstallments,
+    decimal TotalAmount, decimal TotalReceived, decimal TotalPending, List<string> PlanFrequencies);
+
+public record ExpenseDto(int Id, string Description, decimal Amount, string? PaidTo, DateOnly ExpenseDate, string? Notes, DateTime CreatedAt);
 public record ExpenseRequest(string Description, decimal Amount, string? PaidTo, DateOnly ExpenseDate, string? Notes);
 
 public record DashboardStatsDto(
     int TotalPlots, int TotalShops, int TotalSales, decimal TotalReceived,
     decimal TotalExpenses, int TotalProperties, decimal TotalPropertyValue, decimal TotalOutstanding);
 
-public record SocietyOverviewDto(Guid Id, string Name, string? Phone, DateTime CreatedAt, int UserCount);
+public record SocietyOverviewDto(int Id, string Name, string? Phone, DateTime CreatedAt, int UserCount);
 public record SocietiesOverviewResponse(int TotalCount, List<SocietyOverviewDto> Societies);

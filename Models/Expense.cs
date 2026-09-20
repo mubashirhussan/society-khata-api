@@ -2,8 +2,8 @@ namespace SocietyKhata.Api.Models;
 
 public class Expense
 {
-    public Guid Id { get; set; } = Guid.NewGuid();
-    public Guid TenantId { get; set; }
+    public int Id { get; set; }
+    public int TenantId { get; set; }
     public string Description { get; set; } = string.Empty;
     public decimal Amount { get; set; }
     public string? PaidTo { get; set; }

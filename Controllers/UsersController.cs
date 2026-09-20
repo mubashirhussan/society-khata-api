@@ -80,9 +80,9 @@ public class UsersController(AppDbContext db) : ControllerBase
         return Ok(new UserListDto(user.Id, user.Email, role.Id, role.Name, user.FullName, user.IsActive, user.CreatedAt));
     }
 
-    [HttpDelete("{id:guid}")]
+    [HttpDelete("{id:int}")]
     [RequirePermission(PermissionKeys.UsersManage)]
-    public async Task<IActionResult> Delete(Guid id)
+    public async Task<IActionResult> Delete(int id)
     {
         var tenantId = User.GetTenantId();
         var currentUserId = User.GetUserId();

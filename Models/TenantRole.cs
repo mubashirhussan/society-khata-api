@@ -2,8 +2,8 @@ namespace SocietyKhata.Api.Models;
 
 public class TenantRole
 {
-    public Guid Id { get; set; } = Guid.NewGuid();
-    public Guid TenantId { get; set; }
+    public int Id { get; set; }
+    public int TenantId { get; set; }
     public string Name { get; set; } = string.Empty;
     public bool IsSystem { get; set; }
 
@@ -14,7 +14,7 @@ public class TenantRole
 
 public class TenantRolePermission
 {
-    public Guid TenantRoleId { get; set; }
+    public int TenantRoleId { get; set; }
     public string PermissionKey { get; set; } = string.Empty;
 
     public TenantRole? TenantRole { get; set; }

@@ -37,9 +37,9 @@ public class ExpensesController(AppDbContext db) : ControllerBase
         return Ok(new ExpenseDto(expense.Id, expense.Description, expense.Amount, expense.PaidTo, expense.ExpenseDate, expense.Notes, expense.CreatedAt));
     }
 
-    [HttpPut("{id:guid}")]
+    [HttpPut("{id:int}")]
     [RequirePermission(PermissionKeys.ExpensesEdit)]
-    public async Task<ActionResult<ExpenseDto>> Update(Guid id, ExpenseRequest req)
+    public async Task<ActionResult<ExpenseDto>> Update(int id, ExpenseRequest req)
     {
         var expense = await FindAsync(id);
         if (expense is null) return NotFound();
@@ -48,9 +48,9 @@ public class ExpensesController(AppDbContext db) : ControllerBase
         return Ok(new ExpenseDto(expense.Id, expense.Description, expense.Amount, expense.PaidTo, expense.ExpenseDate, expense.Notes, expense.CreatedAt));
     }
 
-    [HttpDelete("{id:guid}")]
+    [HttpDelete("{id:int}")]
     [RequirePermission(PermissionKeys.ExpensesDelete)]
-    public async Task<IActionResult> Delete(Guid id)
+    public async Task<IActionResult> Delete(int id)
     {
         var expense = await FindAsync(id);
         if (expense is null) return NotFound();
@@ -59,7 +59,7 @@ public class ExpensesController(AppDbContext db) : ControllerBase
         return NoContent();
     }
 
-    private async Task<Expense?> FindAsync(Guid id) =>
+    private async Task<Expense?> FindAsync(int id) =>
         await db.Expenses.FirstOrDefaultAsync(e => e.Id == id && e.TenantId == User.GetTenantId());
 
     private static Expense Map(Expense e, ExpenseRequest req)

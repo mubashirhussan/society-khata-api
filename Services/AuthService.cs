@@ -59,7 +59,7 @@ public class AuthService(AppDbContext db, IConfiguration config, PermissionServi
         return await CreateAuthResponseAsync(user, user.Tenant!);
     }
 
-    public async Task<UserDto?> GetMeAsync(Guid userId) =>
+    public async Task<UserDto?> GetMeAsync(int userId) =>
         await UserMapper.LoadUserDtoAsync(db, userId, logos);
 
     private async Task<AuthResponse> CreateAuthResponseAsync(User user, Tenant tenant)

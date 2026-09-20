@@ -2,13 +2,13 @@ namespace SocietyKhata.Api.Models;
 
 public class Payment
 {
-    public Guid Id { get; set; } = Guid.NewGuid();
-    public Guid TenantId { get; set; }
+    public int Id { get; set; }
+    public int TenantId { get; set; }
     public string? ReceiptNo { get; set; }
-    public Guid? ClientId { get; set; }
-    public Guid? PropertyId { get; set; }
-    public Guid? InstallmentDueId { get; set; }
-    public Guid? SourcePaymentId { get; set; }
+    public int? ClientId { get; set; }
+    public int? PropertyId { get; set; }
+    public int? InstallmentDueId { get; set; }
+    public int? SourcePaymentId { get; set; }
     public decimal Amount { get; set; }
     public DateOnly PaymentDate { get; set; } = DateOnly.FromDateTime(DateTime.UtcNow);
     public string? Notes { get; set; }

@@ -43,9 +43,9 @@ public class PropertiesController(AppDbContext db) : ControllerBase
         return Ok(ToDto(property));
     }
 
-    [HttpPut("{id:guid}")]
+    [HttpPut("{id:int}")]
     [RequirePermission(PermissionKeys.PropertiesEdit)]
-    public async Task<ActionResult<PropertyDto>> Update(Guid id, PropertyRequest req)
+    public async Task<ActionResult<PropertyDto>> Update(int id, PropertyRequest req)
     {
         var property = await FindAsync(id);
         if (property is null) return NotFound();
@@ -55,9 +55,9 @@ public class PropertiesController(AppDbContext db) : ControllerBase
         return Ok(ToDto(property));
     }
 
-    [HttpDelete("{id:guid}")]
+    [HttpDelete("{id:int}")]
     [RequirePermission(PermissionKeys.PropertiesDelete)]
-    public async Task<IActionResult> Delete(Guid id)
+    public async Task<IActionResult> Delete(int id)
     {
         var property = await FindAsync(id);
         if (property is null) return NotFound();
@@ -80,7 +80,7 @@ public class PropertiesController(AppDbContext db) : ControllerBase
         return NoContent();
     }
 
-    private async Task<Property?> FindAsync(Guid id) =>
+    private async Task<Property?> FindAsync(int id) =>
         await db.Properties.FirstOrDefaultAsync(p => p.Id == id && p.TenantId == User.GetTenantId());
 
     private static Property Map(Property p, PropertyRequest req)

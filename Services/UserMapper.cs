@@ -20,7 +20,7 @@ public static class UserMapper
             hasLogo,
             user.IsPlatformManager);
 
-    public static async Task<UserDto?> LoadUserDtoAsync(AppDbContext db, Guid userId, TenantLogoStorage? logos = null)
+    public static async Task<UserDto?> LoadUserDtoAsync(AppDbContext db, int userId, TenantLogoStorage? logos = null)
     {
         var user = await db.Users
             .Include(u => u.Tenant)
