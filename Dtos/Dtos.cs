@@ -3,6 +3,7 @@ namespace SocietyKhata.Api.Dtos;
 public record RegisterRequest(string TenantName, string Email, string Password, string? FullName, string? Phone);
 public record LoginRequest(string Email, string Password);
 public record CreateUserRequest(string Email, string Password, int RoleId, string? FullName);
+public record ResetPasswordRequest(string NewPassword);
 public record AuthResponse(string Token, UserDto User);
 public record UserDto(
     int Id, string Email, int RoleId, string RoleName, string? FullName,

@@ -80,6 +80,22 @@ public class UsersController(AppDbContext db) : ControllerBase
         return Ok(new UserListDto(user.Id, user.Email, role.Id, role.Name, user.FullName, user.IsActive, user.CreatedAt));
     }
 
+    [HttpPost("{id:int}/reset-password")]
+    [RequirePermission(PermissionKeys.UsersManage)]
+    public async Task<IActionResult> ResetPassword(int id, ResetPasswordRequest req)
+    {
+        if (string.IsNullOrWhiteSpace(req.NewPassword) || req.NewPassword.Length < 6)
+            return BadRequest(new { error = "Password must be at least 6 characters" });
+
+        var tenantId = User.GetTenantId();
+        var user = await db.Users.FirstOrDefaultAsync(u => u.Id == id && u.TenantId == tenantId);
+        if (user is null) return NotFound();
+
+        user.PasswordHash = BCrypt.Net.BCrypt.HashPassword(req.NewPassword);
+        await db.SaveChangesAsync();
+        return NoContent();
+    }
+
     [HttpDelete("{id:int}")]
     [RequirePermission(PermissionKeys.UsersManage)]
     public async Task<IActionResult> Delete(int id)
