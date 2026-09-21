@@ -134,6 +134,8 @@ using (var scope = app.Services.CreateScope())
             ADD COLUMN IF NOT EXISTS "IsPlatformTenant" boolean NOT NULL DEFAULT false;
         ALTER TABLE "Users"
             ADD COLUMN IF NOT EXISTS "IsPlatformManager" boolean NOT NULL DEFAULT false;
+        ALTER TABLE "Tenants"
+            ADD COLUMN IF NOT EXISTS "IsActive" boolean NOT NULL DEFAULT true;
         CREATE TABLE IF NOT EXISTS "PaymentInstallmentAllocations" (
             "Id" integer NOT NULL,
             "TenantId" integer NOT NULL,

@@ -65,5 +65,8 @@ public record DashboardStatsDto(
     int TotalPlots, int TotalShops, int TotalSales, decimal TotalReceived,
     decimal TotalExpenses, int TotalProperties, decimal TotalPropertyValue, decimal TotalOutstanding);
 
-public record SocietyOverviewDto(int Id, string Name, string? Phone, DateTime CreatedAt, int UserCount);
+public record SocietyOverviewDto(
+    int Id, string Name, string? Phone, DateTime CreatedAt, int UserCount,
+    bool IsActive, int? AdminUserId, string? AdminEmail);
 public record SocietiesOverviewResponse(int TotalCount, List<SocietyOverviewDto> Societies);
+public record SetSocietyActiveRequest(bool IsActive);

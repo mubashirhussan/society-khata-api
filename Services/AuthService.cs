@@ -56,6 +56,9 @@ public class AuthService(AppDbContext db, IConfiguration config, PermissionServi
         if (user is null || !BCrypt.Net.BCrypt.Verify(req.Password, user.PasswordHash))
             throw new UnauthorizedAccessException("Invalid email or password");
 
+        if (!user.Tenant!.IsActive)
+            throw new UnauthorizedAccessException("This society account has been deactivated. Contact support.");
+
         return await CreateAuthResponseAsync(user, user.Tenant!);
     }
 
